@@ -1,0 +1,12 @@
+# <type>(<scope>): <subject>
+#
+# Types: feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert
+# Scope (optional): make|uv|docker|db|alembic|models|agents|simulation|scripts|docs|infra
+# Subject: imperative, lower case, no period at end.
+#
+# Body (optional): Motivation and context. Wrap at ~72 chars.
+# Explain the why and any implications. Bullet points are fine.
+#
+# Footer (optional):
+# BREAKING CHANGE: <description>
+# Closes #<id>
