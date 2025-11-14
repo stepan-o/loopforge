@@ -1,0 +1,9 @@
+# Pre-commit hooks configuration
+# Installs a commit-msg hook that checks Conventional Commits via Commitizen.
+# Note: no additional args are needed; the hook will check the commit message automatically.
+repos:
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v3.28.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]

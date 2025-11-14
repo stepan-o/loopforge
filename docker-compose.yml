@@ -1,0 +1,33 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: loopforge
+      POSTGRES_USER: loopforge
+      POSTGRES_PASSWORD: loopforge
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loopforge -d loopforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://loopforge:loopforge@db:5432/loopforge
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SIM_STEPS: ${SIM_STEPS:-10}
+      PERSIST_TO_DB: ${PERSIST_TO_DB:-true}
+    # Let the app read SIM_STEPS via env; avoid Compose-time interpolation issues
+    command: sh -lc "uv run alembic upgrade head && uv run loopforge-sim"
+
+volumes:
+  pgdata:
