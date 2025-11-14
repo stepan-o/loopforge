@@ -58,6 +58,116 @@ Notes:
 - You can adjust other env vars by prefixing the `make` call, e.g. `LOG_LEVEL=DEBUG make docker-up`.
 - Compose command variants: if your system only has the v2 plugin (`docker compose`), either run those commands directly or override the Makefile variable once, e.g. `make DC="docker compose" docker-up`.
 
+## Architecture overview
+
+### Stack overview
+- Runtime: Python 3.14 (container) using the official uv base image `ghcr.io/astral-sh/uv:python3.14-bookworm`.
+- Dependency/env management: uv with a project-local virtualenv at `/app/.venv` inside the container; `uv.lock` ensures reproducible builds.
+- Database: PostgreSQL 16 (container), accessed via SQLAlchemy 2.x ORM.
+- Migrations: Alembic, auto-applied on container start (`alembic upgrade head`).
+- CLI: Typer app exposed as `loopforge-sim`.
+- Orchestration: Docker Compose (services `app` and `db`).
+
+### Implementation layers and contracts
+
+The project is intentionally layered and minimal. Most logic flows top→down:
+
+1) CLI entrypoint (`scripts/run_simulation.py`)
+   - Method: `main(steps: int | None, no_db: bool)` → parses CLI, resolves steps and persistence mode, calls `loopforge.simulation.run_simulation`.
+   - Contract: Does not contain domain logic. It only selects mode and delegates.
+
+2) Simulation loop (`loopforge/simulation.py`)
+   - Method: `run_simulation(num_steps: int = 10, persist_to_db: bool | None = None)`
+     - No-DB mode: builds in-memory `RobotAgent`s and runs a quick loop without touching the DB.
+     - DB-backed mode: opens a SQLAlchemy session via `session_scope`, seeds robots if needed, and for each step:
+       - Loads `Robot` rows, constructs `RobotAgent`s, runs decisions, updates world state (location, battery),
+         computes context flags, updates emotions (`update_emotions`) and triggers (`agent.run_triggers`),
+         persists state back to the corresponding `Robot` row, and writes `ActionLog` + `Memory` entries.
+       - Buffers environment events (`env.record_event`), then calls `generate_environment_events` to derive
+         events from recent actions/stress; adds them and commits.
+     - Contracts:
+       - Uses only public helpers from `agents.py`, `emotions.py`, `environment.py`.
+       - ORM writes go through SQLAlchemy `Session` inside `session_scope()`.
+       - Supervisor actions are logged to `ActionLog` with `actor_type="supervisor"` and also exposed to
+         robot triggers via `env.recent_supervisor_text`.
+
+3) Agents and triggers (`loopforge/agents.py`)
+   - Classes:
+     - `RobotAgent`: transient step-time representation with fields `name`, `role`, `location`, `battery_level`,
+       `emotions: EmotionState`, `traits: Traits`, `triggers: list[Trigger]`.
+       - Methods:
+         - `decide(step) -> dict`: delegates to `llm_stub.decide_robot_action` (deterministic placeholder).
+         - `run_triggers(env) -> None`: evaluates each `Trigger` after emotions update; guards against exceptions.
+     - `SupervisorAgent`: minimal policy with `decide(step, summary) -> dict`, delegating to `llm_stub.decide_supervisor_action`.
+     - `Trigger` (dataclass):
+       - `name: str`
+       - `condition(agent, env) -> bool`
+       - `effect(agent, env) -> None`
+   - Presets:
+     - `default_traits_for(name) -> Traits`: initial trait profiles for Sprocket/Delta/Nova.
+     - `default_triggers_for(name) -> list[Trigger]`:
+       - Sprocket “Crash Mode”: fires when stress > 0.8 and recent supervisor message mentions "hurry"; lowers `risk_aversion` slightly and bumps stress.
+       - Nova “Quiet Resentment”: fires when stress > 0.6 and satisfaction < 0.3; increases `blame_external`, reduces `obedience` slightly.
+   - Contracts:
+     - Trigger effects only mutate the agent’s emotions/traits; persistence is handled by the simulation layer via helpers.
+
+4) Emotions and traits (`loopforge/emotions.py`)
+   - Dataclasses:
+     - `EmotionState`: `stress`, `curiosity`, `social_need`, `satisfaction`; `clamp()` keeps values within [0,1].
+     - `Traits`: `risk_aversion`, `obedience`, `ambition`, `empathy`, `blame_external`; `clamp()` bounds values.
+   - Functions:
+     - `update_emotions(agent, last_action: dict, context: dict) -> None`:
+       - Applies baseline drift each step (stress/social_need down slightly; curiosity up slightly).
+       - Action-driven nudges: `work`, `recharge`, `talk`, `move`, `inspect`.
+       - Context flags: `near_error` (stress+curiosity up), `isolated` (social_need up, satisfaction down slightly).
+       - Clamps at the end.
+     - ORM sync helpers:
+       - `emotion_from_robot(robot) -> EmotionState`
+       - `apply_emotion_to_robot(robot, emotions) -> None`
+       - `traits_from_robot(robot) -> Traits`
+       - `apply_traits_to_robot(robot, traits) -> None`
+   - Contracts:
+     - Stateless helpers; no direct DB access.
+     - Update logic is small and deterministic, safe to call each step.
+
+5) Environment and events (`loopforge/environment.py`)
+   - Class: `LoopforgeEnvironment` with `rooms`, `step`, `events_buffer`, `recent_supervisor_text`.
+     - Methods: `advance()`, `record_event(type, location, description)`, `drain_events()`.
+   - Function: `generate_environment_events(env, session) -> list[EnvironmentEvent]`:
+     - Heuristic: looks at Sprocket’s last action and stress, and recent errors at that location; with a small
+       deterministic chance, emits an `Incident`. Also occasionally emits `MinorError` to keep the world lively.
+   - Contracts:
+     - Event derivation is side-effect free: returns new `EnvironmentEvent` objects without committing.
+     - Simulation decides when to `session.add()` and commit.
+
+6) Models and DB (`loopforge/models.py`, `loopforge/db.py`)
+   - ORM models:
+     - `Robot`: core state incl. `traits_json` and current emotions.
+     - `Memory`: per-step text notes for robots.
+     - `ActionLog`: actions for robots and supervisor (nullable `robot_id` for supervisor).
+     - `EnvironmentEvent`: events derived from environment or heuristic engine.
+   - DB utilities:
+     - `Base` (DeclarativeBase), `get_engine()`, and `session_scope()` context manager.
+   - Contracts:
+     - All DB interactions in the simulation occur inside `session_scope()` to ensure commit/rollback safety.
+
+7) Decision stubs (`loopforge/llm_stub.py`)
+   - Functions:
+     - `decide_robot_action(...) -> dict` : deterministic policy by role and step.
+     - `decide_supervisor_action(step, summary) -> dict` : broadcasts every 4th step; coaches on “high stress”; otherwise inspects.
+   - Contract: Pure function stubs suitable for replacement by real AI/LLM policy later.
+
+### Data flow (DB-backed step)
+1. Load `Robot` rows (excluding supervisor) → build `RobotAgent`s using `emotion_from_robot` / `traits_from_robot`.
+2. Each agent decides an action → simulation updates location/battery.
+3. Build context flags → `update_emotions(agent, last_action, context)` → `agent.run_triggers(env)`.
+4. Persist back: `apply_emotion_to_robot` + `apply_traits_to_robot` on the same `Robot` row.
+5. Append `ActionLog` and `Memory` rows for each agent.
+6. Drain buffered env events; then call `generate_environment_events` and add those events.
+7. Decide supervisor action; log it; expose text as `env.recent_supervisor_text` for next-step triggers.
+
+---
+
 ## Configuration
 
 Environment variables (container-first):
@@ -107,6 +217,19 @@ make cz-bump       # bump version + tag
   uv run alembic revision --autogenerate -m "describe change"
   uv run alembic upgrade head
   ```
+
+### Alembic versions
+
+- `0001_initial`:
+  - Creates base tables: `robots`, `memories`, `action_logs`, `environment_events`.
+  - Sets initial server defaults for emotion columns (`stress=0.2`, `curiosity=0.5`, `social_need=0.5`, `satisfaction=0.5`).
+- `0002_traits_and_defaults`:
+  - Adds `robots.traits_json` to persist per-robot `Traits`.
+  - Changes server default for `robots.social_need` from `0.5` → `0.3` (affects new inserts only; existing rows keep values).
+
+Notes:
+- Migrations are applied automatically inside the app container at startup (`alembic upgrade head`).
+- If you add/modify ORM models, generate a new revision and apply it (see commands above). For deterministic container builds, commit the new migration into `alembic/versions/`.
 
 ## Development notes
 

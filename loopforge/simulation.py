@@ -10,11 +10,18 @@ from typing import List, Tuple
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .agents import RobotAgent, SupervisorAgent
+from .agents import RobotAgent, SupervisorAgent, default_traits_for, default_triggers_for
 from .config import get_settings
 from .db import session_scope, get_engine
-from .emotions import EmotionState
-from .environment import LoopforgeEnvironment
+from .emotions import (
+    EmotionState,
+    update_emotions,
+    emotion_from_robot,
+    apply_emotion_to_robot,
+    traits_from_robot,
+    apply_traits_to_robot,
+)
+from .environment import LoopforgeEnvironment, generate_environment_events
 from .models import ActionLog, EnvironmentEvent, Memory, Robot
 
 
@@ -30,16 +37,26 @@ def _seed_robots(session: Session) -> None:
     existing = {r.name for r in session.scalars(select(Robot)).all()}
     for name, role, personality in INITIAL_ROBOTS:
         if name not in existing:
+            # Seed with initial traits presets
+            from .agents import default_traits_for  # local import to avoid cycles
+            traits = default_traits_for(name)
             session.add(
                 Robot(
                     name=name,
                     role=role,
                     personality_json=personality,
+                    traits_json={
+                        "risk_aversion": traits.risk_aversion,
+                        "obedience": traits.obedience,
+                        "ambition": traits.ambition,
+                        "empathy": traits.empathy,
+                        "blame_external": traits.blame_external,
+                    },
                     location="factory_floor" if role != "qa" else "control_room",
                     battery_level=100,
                     stress=0.2,
                     curiosity=0.5,
-                    social_need=0.5,
+                    social_need=0.3,
                     satisfaction=0.5,
                 )
             )
@@ -50,6 +67,7 @@ def _seed_robots(session: Session) -> None:
                 name="Supervisor",
                 role="supervisor",
                 personality_json={"oversight": 1.0},
+                traits_json={"risk_aversion": 0.6, "obedience": 0.8, "ambition": 0.5, "empathy": 0.6, "blame_external": 0.2},
                 location="control_room",
                 battery_level=100,
                 stress=0.1,
@@ -61,18 +79,17 @@ def _seed_robots(session: Session) -> None:
 
 
 def _agent_from_robot(r: Robot) -> RobotAgent:
-    return RobotAgent(
+    # Build agent with emotions/traits from DB and attach default triggers by name
+    agent = RobotAgent(
         name=r.name,
         role=r.role,
         location=r.location,
         battery_level=r.battery_level,
-        emotions=EmotionState(
-            stress=r.stress,
-            curiosity=r.curiosity,
-            social_need=r.social_need,
-            satisfaction=r.satisfaction,
-        ),
+        emotions=emotion_from_robot(r),
+        traits=traits_from_robot(r),
+        triggers=default_triggers_for(r.name),
     )
+    return agent
 
 
 def run_simulation(num_steps: int = 10, persist_to_db: bool | None = None) -> None:
@@ -101,6 +118,8 @@ def run_simulation(num_steps: int = 10, persist_to_db: bool | None = None) -> No
                     location=start_loc,
                     battery_level=100,
                     emotions=EmotionState(),
+                    traits=default_traits_for(name),
+                    triggers=default_triggers_for(name),
                 )
             )
         for step in range(1, num_steps + 1):
@@ -120,8 +139,17 @@ def run_simulation(num_steps: int = 10, persist_to_db: bool | None = None) -> No
                     agent.battery_level = max(0, agent.battery_level - 10)
                 elif action == "talk":
                     agent.battery_level = max(0, agent.battery_level - 2)
-                agent.emotions.apply_action_effects(action)
-                # Environment events (not persisted in no-DB mode)
+
+                # Build simple context flags
+                near_error = any(e.location == agent.location for e in env.events_buffer)
+                isolated = sum(1 for a in robots_agents if a.location == agent.location) <= 1
+                ctx = {"near_error": near_error, "isolated": isolated}
+
+                # Update emotions and run triggers
+                update_emotions(agent, {"action_type": action}, ctx)
+                agent.run_triggers(env)
+
+                # Occasional environment events (in-memory only)
                 if action == "work" and step % 7 == 0:
                     env.record_event("info", agent.location, f"(no-db) Minor fault noted by {agent.name}")
                 step_summaries.append(
@@ -159,7 +187,7 @@ def run_simulation(num_steps: int = 10, persist_to_db: bool | None = None) -> No
                 dest = decision.get("destination") or r.location
                 content = decision.get("content")
 
-                # Simple world update: location + battery + emotions
+                # Simple world update: location + battery
                 r.location = dest
                 if action == "recharge":
                     r.battery_level = min(100, r.battery_level + 20)
@@ -170,11 +198,23 @@ def run_simulation(num_steps: int = 10, persist_to_db: bool | None = None) -> No
                 elif action == "talk":
                     r.battery_level = max(0, r.battery_level - 2)
 
-                agent.emotions.apply_action_effects(action)
-                r.stress = agent.emotions.stress
-                r.curiosity = agent.emotions.curiosity
-                r.social_need = agent.emotions.social_need
-                r.satisfaction = agent.emotions.satisfaction
+                # Build a minimal context for emotion updates
+                # near_error: any env event in last few steps at this location
+                recent_err = session.scalars(
+                    select(EnvironmentEvent)
+                    .where(EnvironmentEvent.location == r.location)
+                    .where(EnvironmentEvent.timestamp_step >= max(0, step - 3))
+                    .limit(1)
+                ).first()
+                # isolated: naive heuristic (not talking and not in control room)
+                isolated = (action != "talk" and r.location != "control_room")
+                ctx = {"near_error": bool(recent_err), "isolated": isolated}
+
+                # Update emotions and evaluate triggers, then persist back
+                update_emotions(agent, {"action_type": action}, ctx)
+                agent.run_triggers(env)
+                apply_emotion_to_robot(r, agent.emotions)
+                apply_traits_to_robot(r, agent.traits)
 
                 # Persist action + memory
                 session.add(
@@ -197,7 +237,7 @@ def run_simulation(num_steps: int = 10, persist_to_db: bool | None = None) -> No
                     )
                 )
 
-                # Simple environment event
+                # Simple environment event buffered
                 if action == "work" and step % 7 == 0:
                     env.record_event("error", r.location, f"Minor fault detected by {r.name}")
 
@@ -206,6 +246,12 @@ def run_simulation(num_steps: int = 10, persist_to_db: bool | None = None) -> No
             # Drain env events into DB
             for evt in env.drain_events():
                 session.add(evt)
+
+            # Generate events from recent behavior/state
+            new_events = generate_environment_events(env, session)
+            for evt in new_events:
+                session.add(evt)
+                print(f"t={step}: {evt.event_type.upper()} at {evt.location} — {evt.description}")
 
             # Supervisor overview and action
             summary_text = "; ".join(step_summaries)
@@ -226,6 +272,9 @@ def run_simulation(num_steps: int = 10, persist_to_db: bool | None = None) -> No
                     timestamp_step=step,
                 )
             )
+
+            # Make the supervisor's content available to triggers next step
+            env.recent_supervisor_text = sup_content or env.recent_supervisor_text
 
             # Print a concise summary
             print(f"t={step}: {summary_text}; Supervisor {sup_action}")

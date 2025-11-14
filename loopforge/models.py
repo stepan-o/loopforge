@@ -19,13 +19,14 @@ class Robot(Base):
     name: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False)
     personality_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    traits_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     location: Mapped[str] = mapped_column(String(64), nullable=False, default="factory_floor")
     battery_level: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
 
     # emotions
     stress: Mapped[float] = mapped_column(Float, nullable=False, default=0.2)
     curiosity: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
-    social_need: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    social_need: Mapped[float] = mapped_column(Float, nullable=False, default=0.3)
     satisfaction: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
 
     # relationships
