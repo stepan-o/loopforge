@@ -1,0 +1,62 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# Virtual environments (uv will create .venv here)
+.venv/
+venv/
+env/
+.Python
+.python-version
+
+# Packaging / distribution
+build/
+dist/
+.eggs/
+*.egg
+*.egg-info/
+
+# Unit test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+
+# Type checkers / linters / tooling caches
+.mypy_cache/
+.ruff_cache/
+.pyright/
+
+# Editors / IDEs
+.idea/
+.vscode/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Dotenv files
+.env
+.env.*
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Local database files (if any are used during dev)
+*.sqlite3
+*.db
+
+# Docker / Compose local artifacts (named volume used by default, but ignore a local folder if created)
+pgdata/
+
+# Alembic: keep migrations tracked; do not ignore alembic/versions
+# (intentionally left blank)
+
+# uv lockfile is meant to be committed; do not ignore uv.lock
