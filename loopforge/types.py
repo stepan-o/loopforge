@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Literal
 
 
 # --- AgentPerception --------------------------------------------------------
@@ -102,6 +102,9 @@ class AgentActionPlan:
     targets: List[str] = field(default_factory=list)
     riskiness: float = 0.0  # agent's own sense of risk, 0.0–1.0
 
+    # NEW: central axis for Loopforge behavior (guardrail vs context)
+    mode: Literal["guardrail", "context"] = "guardrail"
+
     narrative: str = ""  # human-readable description of what & why
 
     # Optional metadata for migration from legacy action dicts
@@ -119,6 +122,7 @@ class AgentActionPlan:
             "move_to": self.move_to,
             "targets": list(self.targets),
             "riskiness": float(self.riskiness),
+            "mode": self.mode,
             "narrative": self.narrative,
             "meta": dict(self.meta),
         }
@@ -135,6 +139,7 @@ class AgentActionPlan:
             move_to=data.get("move_to"),
             targets=list(data.get("targets", [])),
             riskiness=float(data.get("riskiness", 0.0)),
+            mode=data.get("mode", "guardrail"),
             narrative=str(data.get("narrative", "")),
             meta=dict(data.get("meta", {})),
         )
