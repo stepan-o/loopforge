@@ -1,7 +1,41 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Literal
+from typing import Dict, List, Optional, Any, Literal, Union
+
+
+# --- SupervisorIntentSnapshot (Phase 9: Supervisor Bias Field) -------------
+
+
+@dataclass
+class SupervisorIntentSnapshot:
+    """
+    Subjective belief about the Supervisor's intent.
+
+    Lives above the seam; JSON-serializable; no DB coupling.
+    """
+
+    true_intent: str  # canonical: "encourage_context" | "tighten_guardrails" | "neutral"
+    perceived_intent: str  # e.g., "punitive", "supportive", "apathetic", "protective", "reckless"
+    confidence: float  # 0.0–1.0
+    notes: str  # short natural-language summary
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "true_intent": self.true_intent,
+            "perceived_intent": self.perceived_intent,
+            "confidence": float(self.confidence),
+            "notes": self.notes,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SupervisorIntentSnapshot":
+        return cls(
+            true_intent=str(data.get("true_intent", "neutral")),
+            perceived_intent=str(data.get("perceived_intent", "apathetic")),
+            confidence=float(data.get("confidence", 0.5)),
+            notes=str(data.get("notes", "")),
+        )
 
 
 # --- AgentPerception --------------------------------------------------------
@@ -41,6 +75,9 @@ class AgentPerception:
 
     recent_supervisor_text: Optional[str] = None
 
+    # Phase 9: agent's biased belief about Supervisor intent for this day/period
+    supervisor_intent: Optional[SupervisorIntentSnapshot] = None
+
     # Perception regime used when constructing this object. Phase 4b default: "accurate".
     perception_mode: Literal["accurate", "partial", "spin"] = "accurate"
 
@@ -61,6 +98,7 @@ class AgentPerception:
             "personal_recent_summary": self.personal_recent_summary,
             "local_events": list(self.local_events),
             "recent_supervisor_text": self.recent_supervisor_text,
+            "supervisor_intent": self.supervisor_intent.to_dict() if self.supervisor_intent else None,
             "perception_mode": self.perception_mode,
             "extra": dict(self.extra),
         }
@@ -73,6 +111,14 @@ class AgentPerception:
         This exists mainly so legacy code/tests that produce dicts can be
         adapted later without massive refactors.
         """
+        # Parse optional supervisor_intent sub-dict if present
+        sup_intent_data = data.get("supervisor_intent")
+        sup_intent_obj = None
+        if isinstance(sup_intent_data, dict):
+            try:
+                sup_intent_obj = SupervisorIntentSnapshot.from_dict(sup_intent_data)
+            except Exception:
+                sup_intent_obj = None
         return cls(
             step=int(data.get("step", 0)),
             name=str(data.get("name", "")),
@@ -85,6 +131,7 @@ class AgentPerception:
             personal_recent_summary=str(data.get("personal_recent_summary", "")),
             local_events=list(data.get("local_events", [])),
             recent_supervisor_text=data.get("recent_supervisor_text"),
+            supervisor_intent=sup_intent_obj,
             perception_mode=data.get("perception_mode", "accurate"),
             extra=dict(data.get("extra", {})),
         )
@@ -172,6 +219,9 @@ class AgentReflection:
     # Phase 8: which perception mode was active while acting this day
     perception_mode: Optional[str] = None
 
+    # Phase 9: perceived supervisor intent keyword for the day (compact)
+    supervisor_perceived_intent: Optional[str] = None
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "summary_of_day": self.summary_of_day,
@@ -179,6 +229,7 @@ class AgentReflection:
             "intended_changes": self.intended_changes,
             "tags": dict(self.tags),
             "perception_mode": self.perception_mode,
+            "supervisor_perceived_intent": self.supervisor_perceived_intent,
         }
 
     @classmethod
@@ -189,6 +240,7 @@ class AgentReflection:
             intended_changes=str(data.get("intended_changes", "")),
             tags=dict(data.get("tags", {})),
             perception_mode=data.get("perception_mode"),
+            supervisor_perceived_intent=data.get("supervisor_perceived_intent"),
         )
 
 
@@ -274,6 +326,8 @@ class ReflectionLogEntry:
     traits_after: Dict[str, float]
     # Phase 8: include the perception mode under which the agent operated
     perception_mode: Optional[str] = None
+    # Phase 9: include the perceived supervisor intent (compact string)
+    supervisor_perceived_intent: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -283,6 +337,7 @@ class ReflectionLogEntry:
             "reflection": self.reflection.to_dict(),
             "traits_after": dict(self.traits_after),
             "perception_mode": self.perception_mode,
+            "supervisor_perceived_intent": self.supervisor_perceived_intent,
         }
 
 

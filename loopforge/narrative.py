@@ -11,6 +11,7 @@ from typing import Any, List
 # Import and re-expose shared types to keep imports stable for existing tests
 from loopforge.types import AgentPerception, AgentActionPlan
 from .perception_shaping import shape_perception
+from .supervisor_bias import infer_supervisor_intent
 
 __all__ = ["AgentPerception", "AgentActionPlan", "build_agent_perception"]
 
@@ -78,15 +79,17 @@ def build_agent_perception(agent: Any, env: Any, step: int) -> AgentPerception:
         getattr(env, "recent_supervisor_text", None),
     )
     # If environment carries supervisor messages, prefer the latest for this agent
+    current_supervisor_message = None
     try:
         mailbox = getattr(env, "supervisor_messages", None)
         if isinstance(mailbox, dict):
             msg = mailbox.get(name or getattr(agent, "name", ""))
             if msg is not None:
+                current_supervisor_message = msg
                 # SupervisorMessage-like object with body
                 recent_supervisor_text = getattr(msg, "body", recent_supervisor_text)
     except Exception:
-        pass
+        current_supervisor_message = None
 
     # Build the baseline perception snapshot, then pass through the shaping layer
     # (Phase 8). Default mode is "accurate" which is a no-op.
@@ -105,4 +108,18 @@ def build_agent_perception(agent: Any, env: Any, step: int) -> AgentPerception:
         extra={},
         perception_mode="accurate",
     )
-    return shape_perception(base, env)
+    shaped = shape_perception(base, env)
+
+    # Phase 9: attach subjective supervisor intent belief; use canonical message source
+    try:
+        snapshot = infer_supervisor_intent(
+            message=current_supervisor_message,
+            traits=shaped.traits,
+            satisfaction=float(shaped.emotions.get("satisfaction", 0.5)),
+        )
+        shaped.supervisor_intent = snapshot
+    except Exception:
+        # fail-soft: never break perception building
+        shaped.supervisor_intent = getattr(shaped, "supervisor_intent", None)
+
+    return shaped

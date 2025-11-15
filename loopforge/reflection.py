@@ -198,6 +198,27 @@ def run_daily_reflection_for_agent(agent: Any, entries: List[ActionLogEntry]) ->
     except Exception:
         # fail-soft: missing config should not break reflections
         reflection.perception_mode = getattr(reflection, "perception_mode", None)
+
+    # Phase 9: extract perceived supervisor intent from the day's perceptions if present.
+    try:
+        # Iterate from the latest entry backwards to find the freshest belief.
+        for e in reversed(entries or []):
+            p = getattr(e, "perception", {}) or {}
+            sup = p.get("supervisor_intent") if isinstance(p, dict) else None
+            if isinstance(sup, dict):
+                perceived = sup.get("perceived_intent")
+                if isinstance(perceived, str) and perceived:
+                    reflection.supervisor_perceived_intent = perceived
+                    # Optional minimal tag for analysis
+                    if perceived == "punitive":
+                        tags = reflection.tags or {}
+                        tags["felt_supervisor_punitive"] = True
+                        reflection.tags = tags
+                    break
+    except Exception:
+        # fail-soft: keep reflection intact if parsing fails
+        pass
+
     apply_reflection_to_traits(agent, reflection)
     return reflection
 

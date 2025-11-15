@@ -112,6 +112,7 @@ class JsonlReflectionLogger:
             reflection=reflection,
             traits_after=traits_after,
             perception_mode=getattr(reflection, "perception_mode", None),
+            supervisor_perceived_intent=getattr(reflection, "supervisor_perceived_intent", None),
         )
         with self.path.open("a", encoding="utf8") as f:
             f.write(json.dumps(entry.to_dict()) + "\n")
