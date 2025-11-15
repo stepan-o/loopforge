@@ -1,128 +1,92 @@
 """Narrative layer primitives for Loopforge City.
 
-This module introduces a thin perception→plan seam between the environment
-and agent policies. It does NOT change simulation mechanics; it just provides
-structured objects we can later feed to an LLM for more narrative behavior.
-
-Phase 1 scope:
-- AgentPerception: what the environment tells an agent they "see" this step.
-- AgentActionPlan: what the agent intends to do, plus a short narrative.
-- build_agent_perception: helper to construct perceptions from current state.
-
-Future phases (not implemented here):
-- AgentReflection for day/episode-end reflections driving trait evolution.
+This module defines the perception → plan seam and constructs perceptions
+using the shared types in `loopforge.types`. Simulation mechanics remain
+unchanged; this is a structural module consumed by policy code.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, List
 
+# Import and re-expose shared types to keep imports stable for existing tests
+from loopforge.types import AgentPerception, AgentActionPlan
 
-@dataclass
-class AgentPerception:
-    """A structured snapshot of what the agent perceives this step.
-
-    Note: Numeric internal state (emotions/traits) is included here in a
-    structured form, but in narrative prompts the agent will receive a
-    textual rendering of these. Keeping both allows deterministic tests
-    and future prompt building without DB access here.
-    """
-
-    step: int
-    name: str
-    role: str
-    location: str
-    battery_level: int
-
-    emotions: Dict[str, float]
-    traits: Dict[str, float]
-
-    world_summary: str
-    personal_recent_summary: str
-    local_events: List[str] = field(default_factory=list)
-    recent_supervisor_text: Optional[str] = None
-
-    # Raw context not directly "shown" to the agent; policies may use it.
-    raw_context: Dict[str, Any] | None = None
-
-
-@dataclass
-class AgentActionPlan:
-    """Canonical, structured description of what the agent intends to do.
-
-    The environment/simulation will translate this back into concrete state
-    updates using existing mechanics (locations, batteries, logs, etc.).
-    """
-
-    intent: str  # e.g. "work", "inspect", "talk", "recharge", "move", "idle"
-    move_to: Optional[str]
-    targets: List[str] = field(default_factory=list)
-    riskiness: float = 0.0  # 0..1 simple perceived risk indicator
-
-    # Free-form narrative describing the immediate plan in natural language
-    narrative: str = ""
+__all__ = ["AgentPerception", "AgentActionPlan", "build_agent_perception"]
 
 
 def build_agent_perception(agent: Any, env: Any, step: int) -> AgentPerception:
-    """Construct an AgentPerception from a RobotAgent and LoopforgeEnvironment.
+    """Construct the AgentPerception for a single agent at a given step.
 
-    This helper is intentionally light and deterministic. It composes small
-    human-readable summaries without calling any LLMs. The `env` object is
-    expected to provide `step`, optional `recent_supervisor_text`, and an
-    `events_buffer` list of EnvironmentEvent-like objects with `location`
-    and `description` attributes.
+    This is the only place that should assemble an AgentPerception from
+    environment / agent state. Future phases may introduce biases or
+    omissions; for now this is a straightforward snapshot.
     """
-    # Emotions/traits are simple dataclasses with floats in [0,1]
-    emotions = {
-        "stress": float(getattr(agent.emotions, "stress", 0.0)),
-        "curiosity": float(getattr(agent.emotions, "curiosity", 0.0)),
-        "social_need": float(getattr(agent.emotions, "social_need", 0.0)),
-        "satisfaction": float(getattr(agent.emotions, "satisfaction", 0.0)),
-    }
-    traits = {
-        "risk_aversion": float(getattr(agent.traits, "risk_aversion", 0.5)),
-        "obedience": float(getattr(agent.traits, "obedience", 0.5)),
-        "ambition": float(getattr(agent.traits, "ambition", 0.5)),
-        "empathy": float(getattr(agent.traits, "empathy", 0.5)),
-        "blame_external": float(getattr(agent.traits, "blame_external", 0.5)),
-    }
+    name = getattr(agent, "name", "")
+    role = getattr(agent, "role", "")
+    location = getattr(agent, "location", "")
 
-    # Local events: take buffered events at the same location this step
-    local_events: List[str] = []
+    # Battery level can be int 0..100 in current code; map to float or leave as-is
+    battery_level = getattr(agent, "battery_level", None)
+
+    # Emotions/traits may be dataclasses; serialize to simple dicts
+    emotions = {}
     try:
-        for evt in getattr(env, "events_buffer", []) or []:
-            if getattr(evt, "location", None) == agent.location:
-                desc = getattr(evt, "description", "")
-                if desc:
-                    local_events.append(str(desc))
+        emotions = {
+            "stress": float(getattr(getattr(agent, "emotions", object()), "stress", 0.0)),
+            "curiosity": float(getattr(getattr(agent, "emotions", object()), "curiosity", 0.0)),
+            "social_need": float(getattr(getattr(agent, "emotions", object()), "social_need", 0.0)),
+            "satisfaction": float(getattr(getattr(agent, "emotions", object()), "satisfaction", 0.0)),
+        }
     except Exception:
-        # Be resilient to any mismatches; this is best-effort context.
-        local_events = []
+        emotions = dict(getattr(agent, "emotions", {}) or {})
 
-    # Deterministic mini-summaries; keep them short for logs/tests
+    traits = {}
+    try:
+        traits = {
+            "risk_aversion": float(getattr(getattr(agent, "traits", object()), "risk_aversion", 0.5)),
+            "obedience": float(getattr(getattr(agent, "traits", object()), "obedience", 0.5)),
+            "ambition": float(getattr(getattr(agent, "traits", object()), "ambition", 0.5)),
+            "empathy": float(getattr(getattr(agent, "traits", object()), "empathy", 0.5)),
+            "blame_external": float(getattr(getattr(agent, "traits", object()), "blame_external", 0.5)),
+        }
+    except Exception:
+        traits = dict(getattr(agent, "traits", {}) or {})
+
+    # Deterministic, compact summaries to aid logs/tests (non-empty)
     world_summary = (
-        f"t={step} • rooms={len(getattr(env, 'rooms', []) or [])} • you are at {agent.location}"
+        f"t={step} • rooms={len(getattr(env, 'rooms', []) or [])} • you are at {location}"
     )
-    personal_recent_summary = (
-        f"You feel stress={emotions['stress']:.2f}, satisfaction={emotions['satisfaction']:.2f}."
+    # Pull a couple of emotion signals if available
+    s = emotions.get("stress", 0.0)
+    sat = emotions.get("satisfaction", 0.0)
+    personal_recent_summary = f"You feel stress={s:.2f}, satisfaction={sat:.2f}."
+
+    # Local events via optional env helper
+    local_events: List[str] = []
+    get_local_events_for_agent = getattr(env, "get_local_events_for_agent", None)
+    if callable(get_local_events_for_agent):
+        try:
+            local_events = list(get_local_events_for_agent(agent))
+        except Exception:
+            local_events = []
+
+    recent_supervisor_text = getattr(
+        agent,
+        "recent_supervisor_text",
+        getattr(env, "recent_supervisor_text", None),
     )
 
     return AgentPerception(
-        step=step,
-        name=str(getattr(agent, "name", "")),
-        role=str(getattr(agent, "role", "")),
-        location=str(getattr(agent, "location", "")),
-        battery_level=int(getattr(agent, "battery_level", 0)),
-        emotions=emotions,
-        traits=traits,
+        step=int(step),
+        name=str(name),
+        role=str(role),
+        location=str(location),
+        battery_level=battery_level,  # leave as provided (Optional[float] in types)
+        emotions=dict(emotions),
+        traits=dict(traits),
         world_summary=world_summary,
         personal_recent_summary=personal_recent_summary,
-        local_events=local_events,
-        recent_supervisor_text=getattr(env, "recent_supervisor_text", None),
-        raw_context={"rooms": list(getattr(env, "rooms", []) or [])},
+        local_events=list(local_events),
+        recent_supervisor_text=recent_supervisor_text,
+        extra={},
     )
-
-
-# NOTE: Future Phase hook (not implemented):
-# @dataclass
-# class AgentReflection: ...  # day/episode-end self-assessment and learning
