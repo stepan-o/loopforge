@@ -5,13 +5,13 @@ executes a simple step loop, persisting actions, memories, and events.
 """
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .agents import RobotAgent, SupervisorAgent, default_traits_for, default_triggers_for
-from .config import get_settings
+from .config import get_settings, get_action_log_path
 from .db import session_scope, get_engine
 from .emotions import (
     EmotionState,
@@ -23,6 +23,11 @@ from .emotions import (
 )
 from .environment import LoopforgeEnvironment, generate_environment_events
 from .models import ActionLog, EnvironmentEvent, Memory, Robot
+from .narrative import build_agent_perception
+from .llm_stub import decide_robot_action_plan
+from pathlib import Path
+from .logging_utils import JsonlActionLogger, log_action_step
+from . import llm_stub
 
 
 INITIAL_ROBOTS: List[Tuple[str, str, dict]] = [
@@ -92,7 +97,12 @@ def _agent_from_robot(r: Robot) -> RobotAgent:
     return agent
 
 
-def run_simulation(num_steps: int = 10, persist_to_db: bool | None = None) -> None:
+def run_simulation(
+    num_steps: int = 10,
+    persist_to_db: bool | None = None,
+    action_logger: Optional[JsonlActionLogger] | None = None,
+    action_log_path: Optional[Path] | None = None,
+) -> None:
     """Run a simple multi-agent simulation for `num_steps` steps.
 
     If `persist_to_db` is True, connects to the DB, seeds robots, and persists
@@ -105,6 +115,14 @@ def run_simulation(num_steps: int = 10, persist_to_db: bool | None = None) -> No
 
     env = LoopforgeEnvironment()
     supervisor = SupervisorAgent()
+
+    # Resolve a single action logger for this run (fail-soft)
+    if action_logger is None:
+        try:
+            effective_path = action_log_path or get_action_log_path()
+        except Exception:
+            effective_path = Path("logs/loopforge_actions.jsonl")
+        action_logger = JsonlActionLogger(effective_path)
 
     if not persist_to_db:
         # Pure in-memory run: initialize agents from INITIAL_ROBOTS
@@ -126,7 +144,31 @@ def run_simulation(num_steps: int = 10, persist_to_db: bool | None = None) -> No
             env.advance()
             step_summaries: List[str] = []
             for agent in robots_agents:
-                decision = agent.decide(step)
+                # Build perception → plan via explicit seam when not using LLM
+                if llm_stub.USE_LLM_POLICY:
+                    decision = agent.decide(step)
+                    plan_narrative = decision.get("narrative")
+                else:
+                    perception = build_agent_perception(agent, env, step)
+                    plan = decide_robot_action_plan(perception)
+                    # Convert to legacy dict; keep shape stable
+                    decision = {
+                        "action_type": plan.intent,
+                        "destination": plan.move_to,
+                        "content": None,
+                        "narrative": plan.narrative,
+                    }
+                    # Log the action step (fail-soft)
+                    try:
+                        log_action_step(
+                            logger=action_logger,
+                            perception=perception,
+                            plan=plan,
+                            action=decision,
+                            outcome=None,
+                        )
+                    except Exception:
+                        pass
                 action = decision.get("action_type", "idle")
                 dest = decision.get("destination") or agent.location
                 agent.location = dest
@@ -182,7 +224,28 @@ def run_simulation(num_steps: int = 10, persist_to_db: bool | None = None) -> No
             step_summaries: List[str] = []
             # Each robot decides and acts
             for r, agent in zip(robots, agents):
-                decision = agent.decide(step)
+                # Build perception → plan via explicit seam when not using LLM
+                if llm_stub.USE_LLM_POLICY:
+                    decision = agent.decide(step)
+                else:
+                    perception = build_agent_perception(agent, env, step)
+                    plan = decide_robot_action_plan(perception)
+                    decision = {
+                        "action_type": plan.intent,
+                        "destination": plan.move_to,
+                        "content": None,
+                        "narrative": plan.narrative,
+                    }
+                    try:
+                        log_action_step(
+                            logger=action_logger,
+                            perception=perception,
+                            plan=plan,
+                            action=decision,
+                            outcome=None,
+                        )
+                    except Exception:
+                        pass
                 action = decision.get("action_type", "idle")
                 dest = decision.get("destination") or r.location
                 content = decision.get("content")

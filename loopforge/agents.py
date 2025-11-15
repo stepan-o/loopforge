@@ -44,6 +44,11 @@ class RobotAgent:
         """Return a dict describing the chosen action.
 
         Keys: action_type, destination (opt), content (opt)
+
+        Legacy decision helper.
+
+        Main simulation paths should build AgentPerception and use
+        llm_stub.decide_robot_action_plan(perception) instead.
         """
         return decide_robot_action(self.name, self.role, step, self.location, self.battery_level, self.emotions)
 

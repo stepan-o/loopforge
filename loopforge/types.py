@@ -41,6 +41,9 @@ class AgentPerception:
 
     recent_supervisor_text: Optional[str] = None
 
+    # Perception regime used when constructing this object. Phase 4b default: "accurate".
+    perception_mode: Literal["accurate", "partial", "spin"] = "accurate"
+
     # Optional free-form field for anything we haven't modeled yet
     extra: Dict[str, Any] = field(default_factory=dict)
 
@@ -58,6 +61,7 @@ class AgentPerception:
             "personal_recent_summary": self.personal_recent_summary,
             "local_events": list(self.local_events),
             "recent_supervisor_text": self.recent_supervisor_text,
+            "perception_mode": self.perception_mode,
             "extra": dict(self.extra),
         }
 
@@ -81,6 +85,7 @@ class AgentPerception:
             personal_recent_summary=str(data.get("personal_recent_summary", "")),
             local_events=list(data.get("local_events", [])),
             recent_supervisor_text=data.get("recent_supervisor_text"),
+            perception_mode=data.get("perception_mode", "accurate"),
             extra=dict(data.get("extra", {})),
         )
 

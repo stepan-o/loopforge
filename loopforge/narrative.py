@@ -48,6 +48,7 @@ def build_agent_perception(agent: Any, env: Any, step: int) -> AgentPerception:
             "ambition": float(getattr(getattr(agent, "traits", object()), "ambition", 0.5)),
             "empathy": float(getattr(getattr(agent, "traits", object()), "empathy", 0.5)),
             "blame_external": float(getattr(getattr(agent, "traits", object()), "blame_external", 0.5)),
+            "guardrail_reliance": float(getattr(getattr(agent, "traits", object()), "guardrail_reliance", 0.5)),
         }
     except Exception:
         traits = dict(getattr(agent, "traits", {}) or {})
@@ -86,6 +87,8 @@ def build_agent_perception(agent: Any, env: Any, step: int) -> AgentPerception:
     except Exception:
         pass
 
+    # Phase 4b: explicitly mark the perception regime used to build this snapshot.
+    # Future phases may set this to "partial" or "spin" to bias summaries.
     return AgentPerception(
         step=int(step),
         name=str(name),
@@ -99,4 +102,5 @@ def build_agent_perception(agent: Any, env: Any, step: int) -> AgentPerception:
         local_events=list(local_events),
         recent_supervisor_text=recent_supervisor_text,
         extra={},
+        perception_mode="accurate",
     )

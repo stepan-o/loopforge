@@ -34,7 +34,10 @@ def test_build_agent_perception_basic():
     assert p.location == agent.location
     assert p.step == 1
     assert set(p.emotions.keys()) == {"stress", "curiosity", "social_need", "satisfaction"}
-    assert set(p.traits.keys()) == {"risk_aversion", "obedience", "ambition", "empathy", "blame_external"}
+    # Traits should at least include the canonical five; additional keys (like guardrail_reliance) are allowed
+    keys = set(p.traits.keys())
+    assert {"risk_aversion", "obedience", "ambition", "empathy", "blame_external"}.issubset(keys)
+    assert "guardrail_reliance" in keys
     assert isinstance(p.world_summary, str) and p.world_summary
     assert isinstance(p.personal_recent_summary, str) and p.personal_recent_summary
     assert isinstance(p.local_events, list)

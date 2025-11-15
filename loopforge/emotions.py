@@ -64,13 +64,19 @@ class EmotionState:
 
 @dataclass
 class Traits:
-    """Stable personality-like traits in [0,1]."""
+    """Stable personality-like traits in [0,1].
+
+    Notes:
+        - guardrail_reliance: how strongly this agent defaults to "follow the manual"
+          vs weighing concrete context. Higher = more likely to pick guardrail mode.
+    """
 
     risk_aversion: float = 0.5
     obedience: float = 0.5
     ambition: float = 0.5
     empathy: float = 0.5
     blame_external: float = 0.5
+    guardrail_reliance: float = 0.5
 
     def clamp(self) -> None:
         self.risk_aversion = _clamp(self.risk_aversion)
@@ -78,6 +84,7 @@ class Traits:
         self.ambition = _clamp(self.ambition)
         self.empathy = _clamp(self.empathy)
         self.blame_external = _clamp(self.blame_external)
+        self.guardrail_reliance = _clamp(self.guardrail_reliance)
 
 
 def update_emotions(agent: Any, last_action: Dict[str, Any], context: Dict[str, Any]) -> None:
@@ -141,6 +148,12 @@ def apply_emotion_to_robot(robot: Any, emotions: EmotionState) -> None:
 
 
 def traits_from_robot(robot: Any) -> Traits:
+    """Construct Traits from an ORM Robot's `traits_json`.
+
+    Traits are round-tripped via the Robot.traits_json column. This includes
+    `guardrail_reliance` alongside other scalar traits. This helper is the
+    canonical sync path from DB → in-memory Traits.
+    """
     data = getattr(robot, "traits_json", None) or {}
     return Traits(
         risk_aversion=float(data.get("risk_aversion", 0.5)),
@@ -148,10 +161,17 @@ def traits_from_robot(robot: Any) -> Traits:
         ambition=float(data.get("ambition", 0.5)),
         empathy=float(data.get("empathy", 0.5)),
         blame_external=float(data.get("blame_external", 0.5)),
+        guardrail_reliance=float(data.get("guardrail_reliance", 0.5)),
     )
 
 
 def apply_traits_to_robot(robot: Any, traits: Traits) -> None:
+    """Persist Traits back to the ORM Robot's `traits_json`.
+
+    Mirrors `traits_from_robot`: clamps values to [0,1] and writes all fields,
+    including `guardrail_reliance`. This is the canonical sync path from
+    in-memory Traits → DB.
+    """
     # Persist as a plain dict; clamp to ensure bounds
     traits.clamp()
     robot.traits_json = {
@@ -160,4 +180,5 @@ def apply_traits_to_robot(robot: Any, traits: Traits) -> None:
         "ambition": float(traits.ambition),
         "empathy": float(traits.empathy),
         "blame_external": float(traits.blame_external),
+        "guardrail_reliance": float(traits.guardrail_reliance),
     }
