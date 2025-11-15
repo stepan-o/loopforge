@@ -49,11 +49,18 @@ Primary modules and contracts:
   - AgentPerception: what the agent “sees” (structured snapshot + short textual summaries)
   - AgentActionPlan: what the agent intends to do (intent/move_to/targets/riskiness + narrative)
   - build_agent_perception(agent, env, step)
-  - Why: A clean seam for LLM prompts later without rewriting the loop; today used with deterministic planning.
+  - Perception modes: `perception_mode` is present (Phase 4b) and currently set to "accurate"; future phases may use "partial" or "spin".
+  - Why: A clean seam for LLM prompts later without rewriting the loop; used directly by the deterministic policy path in simulation.
 - loopforge/llm_stub.py
   - decide_robot_action(...) and decide_supervisor_action(...): stable public API used by the simulation
   - Internally: builds Perception → creates an ActionPlan → adapts back to the legacy action dict schema; optional LLM path behind USE_LLM_POLICY with safe fallback
   - Why: Preserve old contracts while enabling narrative/LLM evolution.
+- loopforge/reflection.py
+  - summarize_agent_day(entries)
+  - build_agent_reflection(agent_name, role, summary) -> AgentReflection
+  - apply_reflection_to_traits(traits_or_agent, reflection) -> Traits | None (tiny, clamped nudges)
+  - run_daily_reflection_for_agent(agent, entries) -> AgentReflection
+  - Why: Opt-in analysis layer for end-of-day reflections and small trait evolution; not wired into the main loop yet (Phase 5).
 - loopforge/models.py + loopforge/db.py
   - SQLAlchemy models (Robot, Memory, ActionLog, EnvironmentEvent) and DB utilities (Base, get_engine, session_scope)
   - Why: Single source of persistence truth; simulation orchestrates commit boundaries via session_scope.

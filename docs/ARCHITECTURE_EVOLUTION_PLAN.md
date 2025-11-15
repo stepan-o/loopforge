@@ -27,10 +27,10 @@ World truth lives below it.
 - `build_agent_perception` introduced in `loopforge/narrative.py`.
 - Legacy behavior preserved.
 
-#### Phase 2 — Route All Decisions Through Seam
+#### Phase 2 — Route Decisions Through Seam (non-LLM path)
 
-- All policies receive `AgentPerception`.
-- Legacy action dicts produced via plan conversion.
+- Non-LLM simulation path builds `AgentPerception` → calls `decide_robot_action_plan` → converts to legacy dict.
+- Legacy `RobotAgent.decide(...)` path remains for LLM mode and may bypass the seam.
 - Note: This seam does not require a literal `policy.py`; adding one as an explicit seam is an implementation choice, not a hard requirement of this plan.
 
 #### Phase 3 — Traits + Decision Mode
@@ -39,11 +39,18 @@ World truth lives below it.
 - Traits like `guardrail_reliance`, `risk_aversion`, `obedience` included in perception.
 
 ### Canonical Roadmap (Phase 4–13)
+
+Status Legend:
+- Implemented
+- Implemented (opt-in)
+- Partially Implemented
+- Planned
 #### Phase 4 — Step-Level Narrative Logging (JSONL)
 
 - Introduce `ActionLogEntry` and `JsonlActionLogger`.
 - Log: perception, plan, mode, narrative, raw_action.
 - Simulation behavior unchanged.
+- Status: Implemented (2025-11-15): `ActionLogEntry` + `JsonlActionLogger` exist and the main non-LLM decision path logs one JSONL line per action via `log_action_step(...)`. Log destination is injectable via `ACTION_LOG_PATH` or `run_simulation(..., action_log_path=...)`. 
 
 #### Phase 5 — Daily Reflections & Trait Drift
 
@@ -53,6 +60,7 @@ World truth lives below it.
   - reflection tags (regretted_obedience, regretted_risk, etc.)
   - `apply_reflection_to_traits`
 - Slow evolution of `guardrail_reliance`, `risk_aversion`, etc.
+- Status: Implemented (2025-11-15): Pure `reflection.py` module provides `summarize_agent_day`, `build_agent_reflection`, `apply_reflection_to_traits`, and `run_daily_reflection_for_agent`. This layer is opt-in and not yet wired to the main loop.
 
 #### Phase 6 — Day Runner & Reflection Logs
 
@@ -73,8 +81,8 @@ World truth lives below it.
 
 #### Phase 8 — Truth vs Belief Drift
 
-- Add perception modes (`accurate`, `partial`, `spin`).
-- Allow distorted summaries, hidden incidents, contradictory Supervisor tone.
+- Perception modes already exist (`perception_mode`: "accurate" | "partial" | "spin").
+- Future phases will use these modes to distort perception, hide incidents, or alter summaries.
 - Tag perceptions and reflections with `perception_mode`.
 
 #### Phase 9 — Incident & Metrics Pipeline
@@ -99,6 +107,7 @@ World truth lives below it.
   - context-heavy
   - experimental LLM-backed
 - Tag each `ActionLogEntry` with `policy_name`.
+- Status: Partially Implemented — `ActionLogEntry.policy_name` exists; multiple policy implementations and the experiment harness are not yet added.
 
 #### Phase 12 — Human-Facing Log Viewer
 
@@ -124,30 +133,26 @@ If older sections remain useful for lineage or inspiration, preserve them but ma
 
 ## Contradiction Notes (current implementation vs plan)
 
-These notes highlight gaps between the Unified Plan and the current codebase. They are intentionally documented here rather than silently corrected, so future changes can be scoped and tracked. Date: 2025-11-15 01:19
+These notes highlight gaps between the Unified Plan and the current codebase. They are intentionally documented here rather than silently corrected, so future changes can be scoped and tracked. Date: 2025-11-15 09:36
 
-1) Policy seam not yet baseline-wide
-- Plan baseline (Phase 2) says all decisions should flow via the Perception → Policy → Plan seam.
-- Current: `RobotAgent.decide(...)` delegates to `llm_stub.decide_robot_action(...)`, which builds a minimal `AgentPerception` internally. There is no dedicated `policy.py`; simulation does not pass an explicit `AgentPerception` to a policy interface yet.
+1) Policy seam usage is partial (by design)
+- Plan baseline (Phase 2) prefers all decisions to flow via the Perception → Policy → Plan seam.
+- Current: The main simulation path (when `USE_LLM_POLICY=False`) builds `AgentPerception` at the call site and calls `decide_robot_action_plan(perception)`; legacy `RobotAgent.decide(...)` remains for the LLM/legacy path. No dedicated `policy.py` is required by the plan.
 
-2) `guardrail_reliance` not present in `Traits` or default perception snapshot
-- Plan baseline (Phase 3) calls out traits including `guardrail_reliance` in perception.
-- Current: `emotions.Traits` lacks `guardrail_reliance`; `narrative.build_agent_perception` therefore omits it unless injected manually.
+2) Phase 3 and Phase 4 gaps resolved
+- `guardrail_reliance` now exists on `Traits` and appears in `AgentPerception`.
+- Step-level JSONL logging is wired in the simulation’s non‑LLM path via `log_action_step(...)` and is injectable via `ACTION_LOG_PATH`/`action_log_path`.
 
-3) Step-level JSONL logging not wired at decision points
-- Plan Phase 4 requires each robot decision to emit an action log line.
-- Current: `ActionLogEntry` and `JsonlActionLogger` exist, and helpers like `log_action_step(...)` are defined, but `llm_stub.decide_robot_action(...)` does not call them yet.
+3) `run_one_day_with_supervisor(...)` orchestrator not present (Phase 7)
+- `day_runner.run_one_day(...)` exists; Supervisor helpers exist; the combined orchestrator has not been added yet.
 
-4) `run_one_day_with_supervisor(...)` orchestrator not present
-- Plan Phase 7 mentions a helper that runs a day, builds Supervisor messages, sets them on the env, and logs them.
-- Current: `day_runner.run_one_day(...)` exists; Supervisor message building/logging exist in their own modules, but the combined helper is not implemented here.
+4) Perception modes added ahead of Phase 8
+- `AgentPerception.perception_mode` exists and is currently always set to "accurate". Future phases may set it to "partial" or "spin".
 
-5) Defaults and naming are close but not identical to examples
-- `AgentActionPlan.mode` currently defaults to "guardrail". The plan does not mandate a specific default; examples sometimes show "context". This is non-breaking but worth noting for tests and docs.
+5) Defaults
+- `AgentActionPlan.mode` defaults to "guardrail". The plan doesn’t mandate a default; keep tests/docs aware of this.
 
-If you want these gaps addressed next, suggested non-breaking tasks are:
-- Introduce a thin `policy.py` with `decide_action_plan(perception)` and route `llm_stub` through it. Update `agents.py`/`simulation.py` callsites to use the seam without altering external behavior.
-- Add `guardrail_reliance` to `Traits` and include it in `build_agent_perception(...)`.
-- Call `log_action_step(...)` inside `llm_stub.decide_robot_action(...)` after building the plan and action dict.
-- Add `run_one_day_with_supervisor(...)` to `day_runner.py` that composes existing helpers.
+Suggested non‑breaking follow‑ups:
+- Add `run_one_day_with_supervisor(...)` to `day_runner.py`.
+- Optionally, add an explicit `policy.py` seam for clarity (not required by the plan).
 

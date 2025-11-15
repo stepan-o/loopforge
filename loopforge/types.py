@@ -167,7 +167,7 @@ class AgentReflection:
     intended_changes: str
 
     # Optional tags for trait / relationship updates later.
-    tags: Dict[str, Any] = field(default_factory=dict)
+    tags: Dict[str, bool] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -216,6 +216,9 @@ class ActionLogEntry:
     raw_action: Dict[str, Any] = field(default_factory=dict)
     perception: Dict[str, Any] = field(default_factory=dict)
 
+    # Optional, used in later phases to tag which policy produced the action
+    policy_name: Optional[str] = None
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "step": self.step,
@@ -230,7 +233,27 @@ class ActionLogEntry:
             "outcome": self.outcome,
             "raw_action": dict(self.raw_action),
             "perception": dict(self.perception),
+            "policy_name": self.policy_name,
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ActionLogEntry":
+        """Best-effort parse from a plain dict (JSONL line)."""
+        return cls(
+            step=int(data.get("step", 0)),
+            agent_name=str(data.get("agent_name", "")),
+            role=str(data.get("role", "")),
+            mode=data.get("mode", "guardrail"),
+            intent=str(data.get("intent", "")),
+            move_to=data.get("move_to"),
+            targets=list(data.get("targets", [])),
+            riskiness=float(data.get("riskiness", 0.0)),
+            narrative=str(data.get("narrative", "")),
+            outcome=data.get("outcome"),
+            raw_action=dict(data.get("raw_action", {})),
+            perception=dict(data.get("perception", {})),
+            policy_name=data.get("policy_name"),
+        )
 
 
 

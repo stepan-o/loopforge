@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Iterable, List
 
 from loopforge.types import (
     ActionLogEntry,
@@ -60,6 +60,34 @@ def log_action_step(
     except Exception:
         # Optional debug hook; for now, fail-soft.
         pass
+
+
+def read_action_log_entries(path: Path) -> List[ActionLogEntry]:
+    """Read a JSONL file of action entries.
+
+    Fail-soft: if the file doesn't exist, return an empty list. Any
+    malformed lines are skipped.
+    """
+    p = Path(path)
+    if not p.exists():
+        return []
+    entries: List[ActionLogEntry] = []
+    try:
+        with p.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    entries.append(ActionLogEntry.from_dict(data))
+                except Exception:
+                    # skip malformed lines
+                    continue
+    except Exception:
+        # If the file becomes unreadable, return what we have so far
+        return entries
+    return entries
 
 
 class JsonlReflectionLogger:

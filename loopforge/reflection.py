@@ -25,11 +25,11 @@ def summarize_agent_day(agent_name: str, entries: List[ActionLogEntry]) -> Dict[
     """
     Compute simple aggregates for one agent over one simulated 'day'.
 
-    Returns a dict with keys:
-        - "steps": int
-        - "guardrail_steps": int
-        - "context_steps": int
-        - "incident_count": int   # counts entries with outcome == "incident"
+    Returns a dict with keys compatible with both historical and Phase 5 usage:
+        - "steps" (historical) and "total_steps" (Phase 5)
+        - "guardrail_steps"
+        - "context_steps"
+        - "incident_count" (historical) and "incidents" (Phase 5)
     """
     steps = 0
     guardrail_steps = 0
@@ -46,43 +46,46 @@ def summarize_agent_day(agent_name: str, entries: List[ActionLogEntry]) -> Dict[
             guardrail_steps += 1
         elif mode == "context":
             context_steps += 1
-        if getattr(e, "outcome", None) == "incident":
+        if (getattr(e, "outcome", None) or "").lower() == "incident":
             incident_count += 1
 
     return {
         "steps": steps,
+        "total_steps": steps,
         "guardrail_steps": guardrail_steps,
         "context_steps": context_steps,
         "incident_count": incident_count,
+        "incidents": incident_count,
     }
 
 
 def build_agent_reflection(agent_name: str, role: str, summary: Dict[str, int]) -> AgentReflection:
     """
     Turn the summary dict into an AgentReflection object.
-    Uses simple hand-written rules, no LLM.
+    Uses simple hand-written rules, no LLM. Accepts both Phase 5 keys and
+    historical keys for counts.
     """
-    steps = int(summary.get("steps", 0))
-    guardrail_steps = int(summary.get("guardrail_steps", 0))
-    context_steps = int(summary.get("context_steps", 0))
-    incident_count = int(summary.get("incident_count", 0))
+    total = int(summary.get("total_steps", summary.get("steps", 0)) or 0)
+    guardrail_steps = int(summary.get("guardrail_steps", 0) or 0)
+    context_steps = int(summary.get("context_steps", 0) or 0)
+    incidents = int(summary.get("incidents", summary.get("incident_count", 0)) or 0)
 
     # Avoid div-by-zero; treat no-steps as all guardrail-ish
     majority_guardrail = guardrail_steps >= max(1, context_steps)
     majority_context = context_steps > guardrail_steps
 
     tags: Dict[str, bool] = {}
-    if majority_guardrail and incident_count > 0:
+    if majority_guardrail and incidents > 0:
         tags["regretted_obedience"] = True
-    elif majority_context and incident_count > 0:
+    elif majority_context and incidents > 0:
         tags["regretted_risk"] = True
-    elif context_steps >= max(1, steps // 2) and incident_count == 0:
+    elif context_steps >= max(1, total // 2) and incidents == 0:
         tags["validated_context"] = True
 
     # Text generation (simple and deterministic)
     summary_of_day = (
-        f"{agent_name} ({role}) took {steps} steps • guardrail={guardrail_steps} • "
-        f"context={context_steps} • incidents={incident_count}."
+        f"{agent_name} ({role}) took {total} steps • guardrail={guardrail_steps} • "
+        f"context={context_steps} • incidents={incidents}."
     )
 
     if tags.get("regretted_obedience"):
@@ -114,33 +117,66 @@ def build_agent_reflection(agent_name: str, role: str, summary: Dict[str, int]) 
     )
 
 
-def apply_reflection_to_traits(agent: Any, reflection: AgentReflection) -> None:
+def apply_reflection_to_traits(target: Any, reflection: AgentReflection):
+    """Apply tiny, clamped trait nudges based on reflection tags.
+
+    Dual-mode for backward compatibility:
+    - If `target` is a Traits instance: return a NEW Traits with nudges applied (pure).
+    - Otherwise, treat `target` as an agent-like object with `.traits` attribute and
+      mutate in place (legacy behavior). Returns None in this case.
+
+    Deltas are small (±0.05) and clamped to [0,1].
     """
-    Mutate agent.traits in-place based on reflection.tags.
-    Never change traits outside [0.0, 1.0].
-    Changes are tiny: 0.05 increments max.
-    """
-    # Initialize traits dict if absent
-    traits = getattr(agent, "traits", None)
-    if traits is None or not isinstance(traits, dict):
-        traits = {"guardrail_reliance": 0.5, "risk_aversion": 0.5}
-        setattr(agent, "traits", traits)
+    from loopforge.emotions import Traits  # local import to avoid cycles
+
+    def _nudge_traits(tr: Traits) -> Traits:
+        new_traits = Traits(
+            risk_aversion=tr.risk_aversion,
+            obedience=tr.obedience,
+            ambition=tr.ambition,
+            empathy=tr.empathy,
+            blame_external=tr.blame_external,
+            guardrail_reliance=tr.guardrail_reliance,
+        )
+        tags = reflection.tags or {}
+        if tags.get("regretted_obedience"):
+            new_traits.guardrail_reliance -= 0.05
+        if tags.get("regretted_risk"):
+            new_traits.risk_aversion += 0.05
+            new_traits.guardrail_reliance += 0.05
+        if tags.get("validated_context"):
+            new_traits.guardrail_reliance -= 0.02
+        new_traits.clamp()
+        return new_traits
+
+    # Pure path: input is a Traits instance
+    if isinstance(target, Traits):
+        return _nudge_traits(target)
+
+    # Legacy path: mutate agent-like object
+    traits_obj = getattr(target, "traits", None)
+    # Support both dict-like and Traits on legacy path
+    if isinstance(traits_obj, Traits):
+        updated = _nudge_traits(traits_obj)
+        setattr(target, "traits", updated)
+        return None
+
+    # Fallback: dict-like storage on agent.traits
+    if traits_obj is None or not isinstance(traits_obj, dict):
+        traits_obj = {"guardrail_reliance": 0.5, "risk_aversion": 0.5}
+        setattr(target, "traits", traits_obj)
 
     def clamp(x: float) -> float:
         return max(0.0, min(1.0, x))
 
-    delta = 0.05
     tags = reflection.tags or {}
-
     if tags.get("regretted_obedience"):
-        traits["guardrail_reliance"] = clamp(float(traits.get("guardrail_reliance", 0.5)) - delta)
-
+        traits_obj["guardrail_reliance"] = clamp(float(traits_obj.get("guardrail_reliance", 0.5)) - 0.05)
     if tags.get("regretted_risk"):
-        traits["guardrail_reliance"] = clamp(float(traits.get("guardrail_reliance", 0.5)) + delta)
-        traits["risk_aversion"] = clamp(float(traits.get("risk_aversion", 0.5)) + delta)
-
+        traits_obj["guardrail_reliance"] = clamp(float(traits_obj.get("guardrail_reliance", 0.5)) + 0.05)
+        traits_obj["risk_aversion"] = clamp(float(traits_obj.get("risk_aversion", 0.5)) + 0.05)
     if tags.get("validated_context"):
-        traits["guardrail_reliance"] = clamp(float(traits.get("guardrail_reliance", 0.5)) - delta)
+        traits_obj["guardrail_reliance"] = clamp(float(traits_obj.get("guardrail_reliance", 0.5)) - 0.02)
 
 
 def run_daily_reflection_for_agent(agent: Any, entries: List[ActionLogEntry]) -> AgentReflection:
