@@ -140,15 +140,17 @@ def run_one_day_with_supervisor(
     )
 
     # Enrich reflections with agent metadata for downstream heuristics
-    name_to_role = {getattr(a, "name", ""): getattr(a, "role", "") for a in agents}
-    for r in reflections:
-        if not hasattr(r, "agent_name"):
-            # Best-effort: try to infer name from summary if missing (optional)
-            setattr(r, "agent_name", getattr(r, "agent_name", ""))
-        # Ensure role present
-        nm = getattr(r, "agent_name", "")
-        if not hasattr(r, "role"):
-            setattr(r, "role", name_to_role.get(nm, ""))
+    # Reflections are returned in the same order as `agents` in run_daily_reflections_for_all_agents.
+    # To avoid fragile inference from text, attach explicit agent_name/role by position.
+    for agent_obj, refl in zip(agents, reflections):
+        try:
+            setattr(refl, "agent_name", getattr(agent_obj, "name", ""))
+        except Exception:
+            pass
+        try:
+            setattr(refl, "role", getattr(agent_obj, "role", ""))
+        except Exception:
+            pass
 
     # Build supervisor messages using heuristic
     messages = build_supervisor_messages_for_day(reflections, day_index=day_index)

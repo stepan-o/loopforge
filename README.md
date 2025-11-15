@@ -264,6 +264,80 @@ Notes:
 
 The app reads environment variables in `loopforge/config.py`.
 
+---
+
+## Seam, logs, and day orchestrators (Phases 4–8)
+
+This project follows a strict decision seam:
+
+```text
+Environment (truth)
+ → AgentPerception (subjective slice; has perception_mode)
+ → Policy (stub or LLM)
+ → AgentActionPlan (intent/move_to/targets/riskiness/mode/narrative)
+ → Legacy action dict (public shape)
+ → Environment (truth updated)
+```
+
+### JSONL logs (fail‑soft)
+- Action logs (Phase 4):
+  - One JSON object per non‑LLM decision step via `log_action_step(...)`.
+  - Path precedence: explicit `run_simulation(..., action_log_path=...)` > `ACTION_LOG_PATH` env var > default `logs/loopforge_actions.jsonl`.
+  - Reader helper: `logging_utils.read_action_log_entries(path)` (fail‑soft; skips malformed lines).
+- Reflection logs (Phase 6):
+  - Written by `JsonlReflectionLogger` (used by the day runner). Includes additive `perception_mode` field (Phase 8).
+  - Provide a path via `day_runner.run_one_day(..., reflection_logger=JsonlReflectionLogger(path))` or `reflection_log_path` in the supervisor orchestrator.
+- Supervisor logs (Phase 7):
+  - Written by `JsonlSupervisorLogger` as one line per message.
+  - Path precedence: `SUPERVISOR_LOG_PATH` env var > explicit `supervisor_log_path` parameter > default `logs/loopforge_supervisor.jsonl`.
+  - Logging is fail‑soft and must not crash the orchestrator.
+
+### Perception modes (Phase 8 — opt‑in)
+- Configure with `PERCEPTION_MODE` env var; allowed values: `accurate` (default), `partial`, `spin`.
+- Helper: `config.get_perception_mode()` normalizes unknown values back to `"accurate"`.
+- Shaping layer: `perception_shaping.shape_perception(perception, env)` is invoked inside `narrative.build_agent_perception(...)`.
+  - `accurate`: no change.
+  - `partial`: truncates `local_events` and shortens `world_summary` (no fabricated facts).
+  - `spin`: tone‑shifts summaries based on recent supervisor guidance (e.g., emphasize risk when protocols tighten). Truth/DB remain untouched.
+- Reflections are tagged with the active `perception_mode`; `ReflectionLogEntry` includes this field.
+
+### Day runner helpers (Phase 6–7)
+Two opt‑in helpers compose runs over a “day” (a window of steps) using the JSONL action log:
+
+- `day_runner.run_one_day(env, agents, steps_per_day=50, day_index=0, reflection_logger=None, action_log_path=Path("logs/loopforge_actions.jsonl")) -> list[AgentReflection]`
+  - Advances the env for `steps_per_day` if it has `step()`, slices action entries for the day, runs reflections for all agents, and optionally logs them.
+- `day_runner.run_one_day_with_supervisor(env, agents, steps_per_day=50, day_index=0, action_log_path=..., reflection_log_path=None, supervisor_log_path=None, reflection_logger=None) -> list[SupervisorMessage]`
+  - Calls `run_one_day(...)`, builds `SupervisorMessage` objects from reflections, logs them (fail‑soft), and publishes them onto `env` for the next day via `set_supervisor_messages_on_env`.
+  - Messages show up in subsequent perceptions through `AgentPerception.recent_supervisor_text`.
+
+Quick example (no DB, contrived env/agents):
+
+```python
+from pathlib import Path
+from types import SimpleNamespace
+from loopforge.day_runner import run_one_day_with_supervisor
+
+class Env:
+    def step(self):
+        pass
+
+env = Env()
+agents = [SimpleNamespace(name="A", role="maintenance", traits={})]
+
+# Suppose logs/loopforge_actions.jsonl already has some entries for agent A
+msgs = run_one_day_with_supervisor(
+    env=env,
+    agents=agents,
+    steps_per_day=50,
+    day_index=0,
+    action_log_path=Path("logs/loopforge_actions.jsonl"),
+    supervisor_log_path=Path("logs/loopforge_supervisor.jsonl"),
+)
+print([m.intent for m in msgs])
+```
+
+See `docs/ARCHITECTURE_EVOLUTION_PLAN.md` for the full phased roadmap and `docs/JUNIE_SYSTEM_PROMPT.md` for the engineering covenant that guides changes.
+
 ## Testing & Coverage
 
 - Run all tests locally:
