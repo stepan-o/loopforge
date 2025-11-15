@@ -31,6 +31,7 @@ World truth lives below it.
 
 - All policies receive `AgentPerception`.
 - Legacy action dicts produced via plan conversion.
+- Note: This seam does not require a literal `policy.py`; adding one as an explicit seam is an implementation choice, not a hard requirement of this plan.
 
 #### Phase 3 — Traits + Decision Mode
 
