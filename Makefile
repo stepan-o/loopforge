@@ -1,4 +1,4 @@
-.PHONY: help uv-sync uv sync run migrate downgrade-base downgrade-one revision docker-up docker-down docker-logs compose run-all hooks-install cz-check cz-bump cz-commit untrack-egg
+.PHONY: help uv-sync uv sync run migrate downgrade-base downgrade-one revision docker-up docker-down docker-logs compose run-all hooks-install cz-check cz-bump cz-commit untrack-egg test
 
 # Simple Makefile to streamline common tasks for Loopforge City
 # Uses uv for environment and dependency management.
@@ -100,3 +100,7 @@ docker-down:
 
 docker-logs:
 	$(DC) logs -f --tail=200
+
+# Tests
+test:
+	$(UV) run pytest

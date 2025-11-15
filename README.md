@@ -175,10 +175,14 @@ Environment variables (container-first):
 - `SIM_STEPS` (default: `10`) – number of simulation steps for the app container.
 - `PERSIST_TO_DB` (default: `true` in containers) – controls DB persistence; local `make run` uses `--no-db` regardless.
 - `ECHO_SQL` (default: `false`) – set to `true` to echo SQL statements from SQLAlchemy.
+- `USE_LLM_POLICY` (default: `false`) – when `true` and an API key is provided, robot/supervisor decisions use an LLM instead of the deterministic stub.
+- `LLM_MODEL_NAME` (default: `gpt-4.1-mini`) – model name passed to the OpenAI client.
+- `OPENAI_API_KEY` (optional) – required only when `USE_LLM_POLICY=true`.
 
 Notes:
 - You do NOT need to set `DATABASE_URL` for container runs; compose wires the app to `db` internally.
 - For local no-DB runs (`make run`), the database is not used at all.
+- LLM usage is fully optional. By default, the simulation uses deterministic stub policies; set `USE_LLM_POLICY=true` and provide `OPENAI_API_KEY` to enable LLM-driven decisions.
 - Advanced: if you intentionally run the app against a locally managed Postgres outside containers, see `CONTRIBUTING.md` for manual Alembic usage and supply `DATABASE_URL` yourself.
 
 The app reads environment variables in `loopforge/config.py`.

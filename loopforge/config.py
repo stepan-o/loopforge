@@ -11,6 +11,19 @@ from dataclasses import dataclass
 DEFAULT_DB_URL = "postgresql+psycopg://loopforge:loopforge@localhost:5432/loopforge"
 
 
+def _bool_from_env(name: str, default: bool = False) -> bool:
+    val = os.getenv(name)
+    if val is None:
+        return default
+    return val.strip().lower() in {"1", "true", "yes", "on"}
+
+
+# LLM policy flags (module-level constants for easy import by decision layer)
+USE_LLM_POLICY: bool = _bool_from_env("USE_LLM_POLICY", default=False)
+LLM_MODEL_NAME: str = os.getenv("LLM_MODEL_NAME", "gpt-4.1-mini")
+OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
+
+
 @dataclass(frozen=True)
 class Settings:
     """Application settings loaded from environment variables.
