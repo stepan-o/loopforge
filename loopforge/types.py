@@ -12,8 +12,12 @@ class AgentPerception:
     """
     What the environment tells an agent at a single step.
 
-    This is the *subjective* view: derived from world truth but may later
-    be incomplete or biased. For now it's just a clean container.
+    This is the agent's subjective view: it is derived from environment
+    truth (DB / world state), but may be incomplete or biased in later phases.
+
+    Environment code is responsible for constructing this from world truth.
+    Agents and policies should rely on AgentPerception rather than reading
+    raw environment state directly.
     """
 
     step: int
