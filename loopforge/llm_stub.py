@@ -7,7 +7,7 @@ action, falling back to the deterministic policy on any error or parse issue.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from .config import USE_LLM_POLICY
 from .llm_client import chat_json
@@ -74,11 +74,29 @@ def _deterministic_supervisor_policy(step: int, summary: str) -> dict:
 
 # ------------------------------ Narrative plan helpers -----------------------
 
+def decide_mode_from_traits(perception: AgentPerception) -> Literal["guardrail", "context"]:
+    """Choose a simple mode from traits (deterministic, safe).
+
+    Heuristic:
+    - Strong guardrail reliance OR very high risk aversion ⇒ "guardrail"
+    - Clearly low guardrail reliance AND low risk aversion ⇒ "context"
+    - Otherwise default to "guardrail" for safety.
+    """
+    traits = perception.traits or {}
+    gr = float(traits.get("guardrail_reliance", 0.5))
+    ra = float(traits.get("risk_aversion", 0.5))
+    if gr >= 0.7 or ra >= 0.8:
+        return "guardrail"
+    if gr <= 0.3 and ra <= 0.4:
+        return "context"
+    return "guardrail"
+
+
 def decide_robot_action_plan(perception: AgentPerception) -> AgentActionPlan:
     """Deterministic plan based on the same logic as the old stub.
 
-    This is Phase 1: we do not invoke an LLM here. We translate the existing
-    heuristic into an AgentActionPlan and attach a short narrative.
+    Phase 3: we compute a mode from traits and stuff it into the plan, but
+    we do not expose it in the legacy action dict yet.
     """
     name = perception.name
     role = perception.role
@@ -112,7 +130,8 @@ def decide_robot_action_plan(perception: AgentPerception) -> AgentActionPlan:
     narrative = (
         f"I plan to {action} at {dest or location}. Battery={battery}%, stress={stress:.2f}."
     )
-    return AgentActionPlan(intent=action, move_to=dest, targets=[], riskiness=risk, narrative=narrative)
+    mode = decide_mode_from_traits(perception)
+    return AgentActionPlan(intent=action, move_to=dest, targets=[], riskiness=risk, mode=mode, narrative=narrative)
 
 
 def decide_supervisor_action_plan(step: int, summary: str) -> AgentActionPlan:
