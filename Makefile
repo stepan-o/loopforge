@@ -104,3 +104,8 @@ docker-logs:
 # Tests
 test:
 	$(UV) run pytest
+
+# Coverage run
+.PHONY: test-cov
+test-cov:
+	$(UV) run pytest --cov=loopforge --cov-report=term-missing

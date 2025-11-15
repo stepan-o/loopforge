@@ -227,11 +227,16 @@ def run_simulation(num_steps: int = 10, persist_to_db: bool | None = None) -> No
                         timestamp_step=step,
                     )
                 )
+                # Include a short narrative from the decision plan if available
+                narrative = decision.get("narrative")
+                mem_text = f"{r.name} did {action} at {dest}."
+                if narrative:
+                    mem_text += f" Plan: {narrative}"
                 session.add(
                     Memory(
                         robot_id=r.id,
                         timestamp_step=step,
-                        text=f"{r.name} did {action} at {dest}.",
+                        text=mem_text,
                         importance=1,
                         tags={"action": action},
                     )

@@ -12,6 +12,7 @@ from typing import Any
 from .config import USE_LLM_POLICY
 from .llm_client import chat_json
 from .emotions import EmotionState
+from .narrative import AgentPerception, AgentActionPlan
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,67 @@ def _deterministic_supervisor_policy(step: int, summary: str) -> dict:
     return {"actor_type": "supervisor", "action_type": "inspect", "destination": "control_room"}
 
 
+# ------------------------------ Narrative plan helpers -----------------------
+
+def decide_robot_action_plan(perception: AgentPerception) -> AgentActionPlan:
+    """Deterministic plan based on the same logic as the old stub.
+
+    This is Phase 1: we do not invoke an LLM here. We translate the existing
+    heuristic into an AgentActionPlan and attach a short narrative.
+    """
+    name = perception.name
+    role = perception.role
+    step = perception.step
+    location = perception.location
+    battery = perception.battery_level
+
+    action = "idle"
+    dest = None
+
+    if battery < 30 or (step % 5 == 0 and battery < 60):
+        action = "recharge"
+        dest = "charging_bay"
+    else:
+        if role == "optimizer":
+            action = "work"
+            dest = "factory_floor"
+        elif role == "maintenance":
+            action = "move" if step % 3 == 0 else "work"
+            dest = ROOMS[(step // 3) % len(ROOMS)] if action == "move" else "factory_floor"
+        elif role == "qa":
+            action = "talk" if step % 2 == 0 else "inspect"
+            dest = "control_room" if action == "inspect" else location
+        else:
+            action = "idle"
+
+    # Simple perceived risk: inversely proportional to battery and directly to stress
+    stress = float(perception.emotions.get("stress", 0.2))
+    risk = min(1.0, max(0.0, 0.5 * stress + (1.0 - min(1.0, battery / 100.0)) * 0.3))
+
+    narrative = (
+        f"I plan to {action} at {dest or location}. Battery={battery}%, stress={stress:.2f}."
+    )
+    return AgentActionPlan(intent=action, move_to=dest, targets=[], riskiness=risk, narrative=narrative)
+
+
+def decide_supervisor_action_plan(step: int, summary: str) -> AgentActionPlan:
+    """Deterministic supervisor plan mirroring the previous stub policy."""
+    if step % 4 == 0:
+        intent = "broadcast"
+        dest = None
+        narrative = f"I will broadcast an update for t={step}."
+    elif "high stress" in summary.lower():
+        intent = "coach"
+        dest = None
+        narrative = "I will coach Sprocket to consider a short recharge."
+    else:
+        intent = "inspect"
+        dest = "control_room"
+        narrative = "I will inspect the control room."
+
+    return AgentActionPlan(intent=intent, move_to=dest, targets=[], riskiness=0.2, narrative=narrative)
+
+
 # ------------------------------ Public API ----------------------------------
 
 def decide_robot_action(
@@ -87,8 +149,29 @@ def decide_robot_action(
     the LLM when enabled; otherwise it returns the deterministic choice.
     """
     if not USE_LLM_POLICY:
-        logger.debug("LLM disabled; using deterministic robot policy for %s", name)
-        return _deterministic_robot_policy(name, role, step, location, battery_level, emotions)
+        logger.debug("LLM disabled; using narrative plan for %s", name)
+        # Build a minimal perception (traits/local events omitted here)
+        from .narrative import build_agent_perception
+        fake_agent = type("A", (), {
+            "name": name,
+            "role": role,
+            "location": location,
+            "battery_level": battery_level,
+            "emotions": emotions,
+            # default neutral traits-like shim
+            "traits": type("T", (), {
+                "risk_aversion": 0.5,
+                "obedience": 0.5,
+                "ambition": 0.5,
+                "empathy": 0.5,
+                "blame_external": 0.5,
+            })(),
+        })()
+        fake_env = type("E", (), {"rooms": [], "events_buffer": [], "recent_supervisor_text": None})()
+        perception = build_agent_perception(fake_agent, fake_env, step)
+        plan = decide_robot_action_plan(perception)
+        dest = plan.move_to
+        return {"action_type": plan.intent, "destination": dest, "content": None, "narrative": plan.narrative}
 
     # Build compact state for the LLM
     state: dict[str, Any] = {
@@ -129,8 +212,20 @@ def decide_robot_action(
 def decide_supervisor_action(step: int, summary: str) -> dict:
     """Return supervisor action dict {action_type, destination?, target_robot_name?, content?}."""
     if not USE_LLM_POLICY:
-        logger.debug("LLM disabled; using deterministic supervisor policy")
-        return _deterministic_supervisor_policy(step, summary)
+        logger.debug("LLM disabled; using narrative supervisor plan")
+        plan = decide_supervisor_action_plan(step, summary)
+        result = {
+            "actor_type": "supervisor",
+            "action_type": plan.intent,
+            "destination": plan.move_to,
+            "content": None,
+        }
+        # In simple plan, we can surface narrative via content for broadcasts/coach, else ignore
+        if plan.intent in {"broadcast", "coach"}:
+            result["content"] = plan.narrative
+        # return with narrative key for consumers interested in it
+        result["narrative"] = plan.narrative
+        return result
 
     system_prompt = (
         "You are the Supervisor in Loopforge City. Return ONLY a JSON object with keys "

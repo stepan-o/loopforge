@@ -187,6 +187,22 @@ Notes:
 
 The app reads environment variables in `loopforge/config.py`.
 
+## Testing & Coverage
+
+- Run all tests locally:
+  ```bash
+  make uv-sync
+  make test
+  ```
+- Run with coverage and see missing lines:
+  ```bash
+  make test-cov
+  ```
+- Run tests inside the container (optional):
+  ```bash
+  docker compose run --rm app uv run pytest -q
+  ```
+
 ## Common tasks (Makefile)
 
 ```bash
