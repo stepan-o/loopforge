@@ -21,6 +21,8 @@ Key ideas:
 - Simulation orchestrates steps, applies rules, persists rows, and prints concise logs.
 
 Primary modules and contracts:
+- loopforge/types.py
+  - Core types (Phase 1): `AgentPerception`, `AgentActionPlan`, `AgentReflection` with `to_dict`/`from_dict` roundtrips. Re‑exported in `loopforge.__init__` for convenience. These are structural only at this stage (no behavior change) and will be used by later phases (policy seam, narrative wiring, reflections).
 - loopforge/simulation.py
   - run_simulation(num_steps=10, persist_to_db=None)
   - Drives each step: build agents from DB (or in-memory), call policies, update locations/battery, compute context, update emotions, evaluate triggers, persist ActionLog/Memory, derive EnvironmentEvent(s), invoke Supervisor.
