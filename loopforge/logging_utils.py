@@ -1,0 +1,55 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Dict, Any, Optional
+
+from loopforge.types import ActionLogEntry, AgentPerception, AgentActionPlan
+
+
+class JsonlActionLogger:
+    """
+    Minimal JSONL logger for action steps.
+
+    Writes one JSON object per line. This is deliberately simple so it
+    can be swapped out later.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = Path(path)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+
+    def write_entry(self, entry: ActionLogEntry) -> None:
+        line = json.dumps(entry.to_dict(), separators=(",", ":"))
+        with self._path.open("a", encoding="utf-8") as f:
+            f.write(line)
+            f.write("\n")
+
+
+def log_action_step(
+    logger: JsonlActionLogger,
+    perception: AgentPerception,
+    plan: AgentActionPlan,
+    action: Dict[str, Any],
+    outcome: Optional[str] = None,
+) -> None:
+    entry = ActionLogEntry(
+        step=perception.step,
+        agent_name=perception.name,
+        role=perception.role,
+        mode=plan.mode,
+        intent=plan.intent,
+        move_to=plan.move_to,
+        targets=list(plan.targets),
+        riskiness=plan.riskiness,
+        narrative=plan.narrative,
+        outcome=outcome,
+        raw_action=dict(action),
+        perception=perception.to_dict(),
+    )
+    # Logging must not crash the sim; swallow exceptions.
+    try:
+        logger.write_entry(entry)
+    except Exception:
+        # Optional debug hook; for now, fail-soft.
+        pass

@@ -180,3 +180,49 @@ class AgentReflection:
             intended_changes=str(data.get("intended_changes", "")),
             tags=dict(data.get("tags", {})),
         )
+
+
+
+# --- ActionLogEntry ----------------------------------------------------------
+
+
+@dataclass
+class ActionLogEntry:
+    """
+    Structured log for a single agent step.
+
+    Captures what the agent knew (perception summary),
+    how it decided (mode + intent), and what action dict we applied.
+    """
+
+    step: int
+    agent_name: str
+    role: str
+
+    mode: Literal["guardrail", "context"]
+    intent: str
+    move_to: Optional[str]
+    targets: List[str]
+    riskiness: float
+    narrative: str
+
+    outcome: Optional[str] = None  # optional for now
+
+    raw_action: Dict[str, Any] = field(default_factory=dict)
+    perception: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "step": self.step,
+            "agent_name": self.agent_name,
+            "role": self.role,
+            "mode": self.mode,
+            "intent": self.intent,
+            "move_to": self.move_to,
+            "targets": list(self.targets),
+            "riskiness": float(self.riskiness),
+            "narrative": self.narrative,
+            "outcome": self.outcome,
+            "raw_action": dict(self.raw_action),
+            "perception": dict(self.perception),
+        }

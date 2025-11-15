@@ -13,6 +13,11 @@ from .config import USE_LLM_POLICY
 from .llm_client import chat_json
 from .emotions import EmotionState
 from .narrative import AgentPerception, AgentActionPlan, build_agent_perception
+from pathlib import Path
+from .logging_utils import JsonlActionLogger, log_action_step
+
+# Very simple global logger; optional and fail-soft.
+_ACTION_LOGGER: JsonlActionLogger | None = JsonlActionLogger(Path("logs/loopforge_actions.jsonl"))
 
 logger = logging.getLogger(__name__)
 
