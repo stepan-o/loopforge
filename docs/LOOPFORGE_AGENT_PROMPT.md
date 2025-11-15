@@ -108,10 +108,15 @@ Rough fields (names can vary, meaning should not):
 - `local_events: List[str]`  
   incidents/alerts in nearby rooms/lines
 - `recent_supervisor_text: Optional[str]`
+- `extra: Dict[str, Any]`
+  scratch space for experiment-specific fields you haven’t modeled yet; don’t rely on it for long-term invariants.
 
 Implementation detail:
 
 - A helper like `build_agent_perception(agent, env, step)` should live in a single place (e.g. `narrative.py` or `environment.py`) and be the **only** way decisions see the world.
+
+Implementation detail (current):
+The canonical dataclass implementation lives in `loopforge/types.py` as `AgentPerception` and is re-exported from the top-level package (`from loopforge import AgentPerception`). If you need to extend the schema, change it there and update the round-trip tests in `tests/test_types.py`.
 
 ### 2.2 `AgentActionPlan`
 
@@ -119,20 +124,22 @@ This is what the agent *intends to do* in the next step.
 
 **Intent:** provide a canonical, interpretable structure that the environment can turn into concrete updates.
 
-Rough fields:
+Rough fields (current implementation in `loopforge/types.py`):
 
-- `intent: str`  
-  e.g. `"work"`, `"inspect"`, `"confront"`, `"recharge"`, `"avoid"`, `"idle"`, etc.
-- `move_to: Optional[str]`  
-  room/area, or `None` to stay put
-- `targets: List[str]`  
-  other agents, subsystems, lines linked to this action
-- `riskiness: float` (0.0–1.0)  
-  agent’s own sense of risk
-- `mode: Literal["guardrail", "context"]`  
-  central axis; see below
-- `narrative: str`  
-  free text: “how I act and why”
+- intent: str  
+  e.g. `"work"`, `"inspect"`, `"confront"`, `"recharge"`, `"avoid"`, `"idle"`.
+- move_to: Optional[str]  
+  room/area name, or `None` to stay put.
+- targets: List[str]  
+  other agents, subsystems, lines linked to this action.
+- riskiness: float (0.0–1.0)  
+  agent’s own sense of risk.
+- mode: Literal["guardrail", "context"]  
+  central axis for Loopforge behavior; currently defaults to `"guardrail"`.
+- narrative: str  
+  free text: “what I do and why.”
+- meta: Dict[str, Any]  
+  optional metadata for migration from legacy action dicts.
 
 Simulation code should:
 
@@ -321,7 +328,7 @@ Think: “I’m leaving breadcrumbs for a future model with half my context.”
 When in doubt, push the code toward this shape:
 
 ### 6.1 Policy interface
-A small, clear API for decisions:
+There is a small, clear API for decisions at the type level:
 
 ```text
 def decide_robot_action_plan(perception: AgentPerception) -> AgentActionPlan: ...
@@ -329,9 +336,29 @@ def decide_robot_action_plan(perception: AgentPerception) -> AgentActionPlan: ..
 def decide_supervisor_action_plan(perception: AgentPerception) -> AgentActionPlan: ...
 ```
 
-- `llm_stub` implements it deterministically (no network).
-- `llm_client` can implement LLM-backed logic or be called inside `llm_stub` under a flag.
-- Simulation/agents use only this interface, not random ad-hoc LLM calls.
+That’s the north star.
+
+Current implementation (Phase 1):
+
+- The public entrypoints used by the simulation live in `loopforge/llm_stub.py`:
+
+      decide_robot_action(agent, env, step) -> dict
+      decide_supervisor_action(supervisor, env, step, summary) -> dict
+
+- Internally, both follow the seam:
+
+  1. Build an `AgentPerception` (today via helpers in `loopforge/narrative.py` and/or environment).
+  2. Create an `AgentActionPlan` from that perception (deterministic stub policy).
+  3. Adapt the plan back to the legacy action **dict** schema that the simulation already expects.
+
+- `AgentPerception`, `AgentActionPlan`, and `AgentReflection` are implemented in `loopforge/types.py` and re-exported from `loopforge.__init__`.
+
+Future phases are allowed to:
+
+- introduce real `decide_*_action_plan(...)` functions that return `AgentActionPlan` directly, and
+- gradually migrate the simulation to consume `AgentActionPlan` instead of raw dicts,
+
+but they **must** keep the Perception → Plan seam intact and avoid sprinkling ad-hoc LLM calls outside this layer.
 
 ### 6.2 Environment helpers
 - `build_agent_perception(...)` to construct perceptions from world state.
@@ -511,3 +538,30 @@ If you’re ever torn between two options, optimize for:
 
 If you’ve read this far: welcome to the Loopforge lineage.  
 Now go make some beautifully messed-up robots — and log everything.
+
+---
+
+## 11. Implementation snapshot (as of commit ab6b7c5, 2025-11-15)
+
+This is a lightweight checkpoint so future architects can see where the code was when this prompt was last aligned.
+
+- Core types
+  - `AgentPerception`, `AgentActionPlan`, `AgentReflection` live in `loopforge/types.py`.
+  - They support `to_dict` / `from_dict` roundtrips and are re-exported from `loopforge.__init__` as `AgentPerception`, `AgentActionPlan`, `AgentReflection`.
+  - `AgentActionPlan` already has a `mode: Literal["guardrail", "context"]` field, defaulting to `"guardrail"`, included in the dict roundtrip.
+
+- Policy seam
+  - `loopforge.llm_stub` implements the Perception → Plan → dict pipeline for robots and Supervisor.
+  - Simulation still consumes legacy action **dicts**; tests (`tests/test_llm_stub_policy_pipeline.py`) assert that the public dict shape stays stable and does **not** leak new fields like `mode`.
+
+- Docs / roadmap
+  - `README.md` points to:
+    - `docs/LOOPFORGE_AGENT_PROMPT.md` (this file) as the canonical system prompt/design brief.
+    - `docs/ARCHITECTURE_EVOLUTION_PLAN.md` for a 10-phase roadmap.
+    - `docs/STATELOG.md` for the last known good commit + test status.
+
+If you land here in a future commit and the code has drifted from this snapshot, you have three options:
+
+1. Bring the code back toward this design (if the drift was accidental).
+2. Update this snapshot **and** the evolution plan to reflect the new reality.
+3. Explicitly deprecate parts of this prompt in a short note (“We’re changing X because Y”), so the lineage stays legible.
