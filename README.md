@@ -2,6 +2,66 @@
 
 A small, text-based multi-agent simulation scaffold. Three robots plus a Supervisor act over discrete steps; state persists to PostgreSQL via SQLAlchemy with Alembic migrations. The app is containerized and uses `uv` for Python env and dependency management.
 
+---
+
+## LLM-friendly project overview (what, where, why)
+
+This repository is intentionally structured to be easy for both humans and LLMs to understand, extend, and test. The design separates concerns so you can safely modify one layer without breaking others.
+
+Key ideas:
+- Environment owns hard state and rules (facts, numbers, DB writes) — agents never mutate DB directly.
+- Agents decide actions through a clear seam (Perception → ActionPlan). Today the plan is deterministic; later it can be LLM-driven without changing the simulation loop.
+- Simulation orchestrates steps, applies rules, persists rows, and prints concise logs.
+
+Primary modules and contracts:
+- loopforge/simulation.py
+  - run_simulation(num_steps=10, persist_to_db=None)
+  - Drives each step: build agents from DB (or in-memory), call policies, update locations/battery, compute context, update emotions, evaluate triggers, persist ActionLog/Memory, derive EnvironmentEvent(s), invoke Supervisor.
+  - Contract: Pure orchestrator; assumes policy functions follow a stable action dict schema.
+- loopforge/agents.py
+  - RobotAgent(name, role, location, battery_level, emotions, traits, triggers)
+    - decide(step) -> dict  (delegates to llm_stub.decide_robot_action)
+    - run_triggers(env) -> None
+  - SupervisorAgent
+    - decide(step, summary) -> dict (delegates to llm_stub.decide_supervisor_action)
+  - Trigger(name, condition(agent, env), effect(agent, env))
+  - Why: Encapsulates transient per-step agent state and behavioral hooks separate from persistence.
+- loopforge/emotions.py
+  - EmotionState + clamp; Traits + clamp
+  - update_emotions(agent, last_action: dict, context: dict)
+  - ORM sync helpers: emotion_from_robot, apply_emotion_to_robot, traits_from_robot, apply_traits_to_robot
+  - Why: Keep affective/trait logic small, explicit, and testable; DB code stays elsewhere.
+- loopforge/environment.py
+  - LoopforgeEnvironment: rooms, step counter, events buffer, recent_supervisor_text; advance/drain/record methods
+  - generate_environment_events(env, session) -> list[EnvironmentEvent]
+  - Why: Derive world events from recent actions/stress deterministically; returns objects, simulation decides when to add/commit.
+- loopforge/narrative.py
+  - AgentPerception: what the agent “sees” (structured snapshot + short textual summaries)
+  - AgentActionPlan: what the agent intends to do (intent/move_to/targets/riskiness + narrative)
+  - build_agent_perception(agent, env, step)
+  - Why: A clean seam for LLM prompts later without rewriting the loop; today used with deterministic planning.
+- loopforge/llm_stub.py
+  - decide_robot_action(...) and decide_supervisor_action(...): stable public API used by the simulation
+  - Internally: builds Perception → creates an ActionPlan → adapts back to the legacy action dict schema; optional LLM path behind USE_LLM_POLICY with safe fallback
+  - Why: Preserve old contracts while enabling narrative/LLM evolution.
+- loopforge/models.py + loopforge/db.py
+  - SQLAlchemy models (Robot, Memory, ActionLog, EnvironmentEvent) and DB utilities (Base, get_engine, session_scope)
+  - Why: Single source of persistence truth; simulation orchestrates commit boundaries via session_scope.
+- scripts/run_simulation.py (Typer CLI)
+  - loopforge-sim entrypoint. Does not contain domain logic; resolves steps and persistence mode and calls run_simulation.
+
+Data flow in a step (DB-backed):
+1) Load Robot rows → build RobotAgent(s) using emotion/trait helpers.
+2) For each agent: Perception → ActionPlan → action dict; simulation applies location/battery changes.
+3) Compute context flags → update_emotions → run_triggers → persist updated emotions/traits to the same Robot row.
+4) Write ActionLog + Memory (Memory.text embeds a short “Plan:” narrative for later analysis).
+5) Drain buffered events; derive new events with generate_environment_events and add them.
+6) Supervisor decides next action; action is logged; env.recent_supervisor_text is updated (used by triggers next step).
+
+Testing philosophy:
+- Unit tests cover config flags, LLM wrappers (mocked), perception/plan generation, emotion updates, triggers, and the deterministic event engine.
+- Integration tests cover simulation in no‑DB mode and DB-backed mode using a temporary SQLite engine via monkeypatch (fast, offline, deterministic).
+
 ## Quickstart
 
 Most local runs should be containerized (app + db). For a super-fast local smoke test without touching any database, use the no-DB mode.
