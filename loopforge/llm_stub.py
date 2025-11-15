@@ -12,7 +12,7 @@ from typing import Any
 from .config import USE_LLM_POLICY
 from .llm_client import chat_json
 from .emotions import EmotionState
-from .narrative import AgentPerception, AgentActionPlan
+from .narrative import AgentPerception, AgentActionPlan, build_agent_perception
 
 logger = logging.getLogger(__name__)
 
