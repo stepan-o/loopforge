@@ -336,3 +336,43 @@ Dockerfile, docker-compose.yml, alembic.ini, pyproject.toml, README.md
 - uv not found in `make`: ensure `$HOME/.local/bin` is on PATH or run `PATH="$HOME/.local/bin:$PATH" make uv-sync`.
 - Connection issues: verify `DATABASE_URL` and that Postgres is running (`docker ps` or `pg_isready`).
 - psycopg URL scheme: use `postgresql+psycopg://...` (psycopg 3).
+
+
+---
+
+## Current capabilities (snapshot)
+- Deterministic step-based simulation with three robots (Sprocket, Delta, Nova) and a Supervisor.
+- Emotions and traits tracked per robot with simple update heuristics and clamped ranges.
+- Triggers evaluated after emotions (e.g., Sprocket “Crash Mode”, Nova “Quiet Resentment”).
+- Minimal event engine derives `Incident`/`MinorError` from recent actions and stress.
+- Narrative layer (Phase 1): Environment builds `AgentPerception`; policy produces an `AgentActionPlan` with a short narrative; simulation persists the narrative into `Memory` ("Plan: ...").
+- Optional LLM decision mode behind a feature flag with safe fallback to deterministic policies.
+- Pytest suite covering config flags, LLM wrapper, narrative layer, emotions, triggers, event engine, and both simulation modes.
+
+## LLM decision mode (optional)
+The project runs deterministically by default. To let an LLM propose next actions (robots and supervisor) while keeping the same contracts and safe fallback:
+
+Required env vars
+- `USE_LLM_POLICY=true`
+- `OPENAI_API_KEY=<your key>`
+- optional: `LLM_MODEL_NAME` (default `gpt-4.1-mini`)
+
+Local (no DB, just to see decisions change)
+```bash
+USE_LLM_POLICY=true OPENAI_API_KEY=sk-... uv run loopforge-sim --no-db --steps 5
+```
+
+Containers (DB-backed)
+```bash
+USE_LLM_POLICY=true OPENAI_API_KEY=sk-... make docker-up
+make docker-logs
+```
+If the model response is invalid or the API is unavailable, the code automatically falls back to the deterministic stub for that decision.
+
+## Where to add new behavior
+- New triggers: `loopforge/agents.py` → extend `default_triggers_for(name)` or attach at runtime.
+- New emotion/context rules: `loopforge/emotions.py` → adjust `update_emotions` or add helpers.
+- New event heuristics: `loopforge/environment.py` → update `generate_environment_events` (keeps DB-agnostic behavior; return objects for the simulation to persist).
+- Richer narrative prompts or parsing: `loopforge/narrative.py` and `loopforge/llm_stub.py` → expand `AgentPerception`/`AgentActionPlan` and the adapters without touching the loop.
+- DB schema evolution: `loopforge/models.py` then create a migration via `make revision NAME="..."` and `make migrate`.
+
