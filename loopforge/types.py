@@ -248,3 +248,39 @@ class ReflectionLogEntry:
             "reflection": self.reflection.to_dict(),
             "traits_after": dict(self.traits_after),
         }
+
+
+
+# --- SupervisorMessage -------------------------------------------------------
+
+
+@dataclass
+class SupervisorMessage:
+    """
+    A single Supervisor message directed at one agent for a given day.
+    This is what eventually shows up as `recent_supervisor_text` in
+    AgentPerception.
+    """
+
+    agent_name: str
+    role: str
+    day_index: int
+
+    # What kind of nudge this is
+    intent: Literal["tighten_guardrails", "encourage_context", "neutral_update"]
+
+    # Text the agent actually "sees"
+    body: str
+
+    # Extra flags for analysis
+    tags: Dict[str, bool] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "agent_name": self.agent_name,
+            "role": self.role,
+            "day_index": self.day_index,
+            "intent": self.intent,
+            "body": self.body,
+            "tags": dict(self.tags),
+        }

@@ -75,6 +75,16 @@ def build_agent_perception(agent: Any, env: Any, step: int) -> AgentPerception:
         "recent_supervisor_text",
         getattr(env, "recent_supervisor_text", None),
     )
+    # If environment carries supervisor messages, prefer the latest for this agent
+    try:
+        mailbox = getattr(env, "supervisor_messages", None)
+        if isinstance(mailbox, dict):
+            msg = mailbox.get(name or getattr(agent, "name", ""))
+            if msg is not None:
+                # SupervisorMessage-like object with body
+                recent_supervisor_text = getattr(msg, "body", recent_supervisor_text)
+    except Exception:
+        pass
 
     return AgentPerception(
         step=int(step),

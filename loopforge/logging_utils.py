@@ -10,6 +10,7 @@ from loopforge.types import (
     AgentActionPlan,
     ReflectionLogEntry,
     AgentReflection,
+    SupervisorMessage,
 )
 
 
@@ -85,3 +86,19 @@ class JsonlReflectionLogger:
         )
         with self.path.open("a", encoding="utf8") as f:
             f.write(json.dumps(entry.to_dict()) + "\n")
+
+
+class JsonlSupervisorLogger:
+    """
+    Minimal JSONL logger for Supervisor messages.
+    One JSON object per line, using SupervisorMessage.to_dict().
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def write_message(self, message: SupervisorMessage) -> None:
+        with self.path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(message.to_dict()))
+            f.write("\n")
