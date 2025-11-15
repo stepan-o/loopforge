@@ -1,9 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from loopforge.types import ActionLogEntry, AgentReflection
+from loopforge.logging_utils import JsonlReflectionLogger
+
+
+def filter_entries_for_day(
+    entries: List[ActionLogEntry],
+    day_index: int,
+    steps_per_day: int,
+) -> List[ActionLogEntry]:
+    """
+    Return only those entries whose `step` fits within the day window:
+        step ∈ [day_index * steps_per_day, (day_index + 1) * steps_per_day)
+    """
+    start = day_index * steps_per_day
+    end = (day_index + 1) * steps_per_day
+    return [e for e in entries if start <= getattr(e, "step", -1) < end]
 
 
 def summarize_agent_day(agent_name: str, entries: List[ActionLogEntry]) -> Dict[str, int]:
@@ -142,3 +157,38 @@ def run_daily_reflection_for_agent(agent: Any, entries: List[ActionLogEntry]) ->
     reflection = build_agent_reflection(name, role, summary)
     apply_reflection_to_traits(agent, reflection)
     return reflection
+
+
+def run_daily_reflections_for_all_agents(
+    agents: List[Any],
+    entries: List[ActionLogEntry],
+    logger: Optional[JsonlReflectionLogger],
+    day_index: int,
+) -> List[AgentReflection]:
+    """
+    For each agent:
+      - extract only this agent's entries,
+      - compute reflection via run_daily_reflection_for_agent,
+      - if logger provided: write ReflectionLogEntry.
+    Returns a list of AgentReflection objects.
+    """
+    reflections: List[AgentReflection] = []
+    for agent in agents:
+        name = getattr(agent, "name", "")
+        role = getattr(agent, "role", "")
+        agent_entries = [e for e in entries if getattr(e, "agent_name", None) == name]
+        refl = run_daily_reflection_for_agent(agent, agent_entries)
+        reflections.append(refl)
+        if logger is not None:
+            try:
+                logger.write_reflection(
+                    agent_name=name,
+                    role=role,
+                    day_index=day_index,
+                    reflection=refl,
+                    traits_after={k: float(v) for k, v in getattr(agent, "traits", {}).items()},
+                )
+            except Exception:
+                # fail-soft
+                pass
+    return reflections

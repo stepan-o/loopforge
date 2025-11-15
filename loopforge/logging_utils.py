@@ -4,7 +4,13 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from loopforge.types import ActionLogEntry, AgentPerception, AgentActionPlan
+from loopforge.types import (
+    ActionLogEntry,
+    AgentPerception,
+    AgentActionPlan,
+    ReflectionLogEntry,
+    AgentReflection,
+)
 
 
 class JsonlActionLogger:
@@ -53,3 +59,29 @@ def log_action_step(
     except Exception:
         # Optional debug hook; for now, fail-soft.
         pass
+
+
+class JsonlReflectionLogger:
+    """Minimal JSONL logger for daily reflections."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def write_reflection(
+        self,
+        agent_name: str,
+        role: str,
+        day_index: int,
+        reflection: AgentReflection,
+        traits_after: Dict[str, float],
+    ) -> None:
+        entry = ReflectionLogEntry(
+            agent_name=agent_name,
+            role=role,
+            day_index=day_index,
+            reflection=reflection,
+            traits_after=traits_after,
+        )
+        with self.path.open("a", encoding="utf8") as f:
+            f.write(json.dumps(entry.to_dict()) + "\n")

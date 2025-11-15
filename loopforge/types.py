@@ -226,3 +226,25 @@ class ActionLogEntry:
             "raw_action": dict(self.raw_action),
             "perception": dict(self.perception),
         }
+
+
+
+# --- ReflectionLogEntry ------------------------------------------------------
+
+
+@dataclass
+class ReflectionLogEntry:
+    agent_name: str
+    role: str
+    day_index: int
+    reflection: AgentReflection
+    traits_after: Dict[str, float]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "agent_name": self.agent_name,
+            "role": self.role,
+            "day_index": self.day_index,
+            "reflection": self.reflection.to_dict(),
+            "traits_after": dict(self.traits_after),
+        }
