@@ -10,6 +10,7 @@ from typing import Any, List
 
 # Import and re-expose shared types to keep imports stable for existing tests
 from loopforge.types import AgentPerception, AgentActionPlan
+from .perception_shaping import shape_perception
 
 __all__ = ["AgentPerception", "AgentActionPlan", "build_agent_perception"]
 
@@ -87,9 +88,9 @@ def build_agent_perception(agent: Any, env: Any, step: int) -> AgentPerception:
     except Exception:
         pass
 
-    # Phase 4b: explicitly mark the perception regime used to build this snapshot.
-    # Future phases may set this to "partial" or "spin" to bias summaries.
-    return AgentPerception(
+    # Build the baseline perception snapshot, then pass through the shaping layer
+    # (Phase 8). Default mode is "accurate" which is a no-op.
+    base = AgentPerception(
         step=int(step),
         name=str(name),
         role=str(role),
@@ -104,3 +105,4 @@ def build_agent_perception(agent: Any, env: Any, step: int) -> AgentPerception:
         extra={},
         perception_mode="accurate",
     )
+    return shape_perception(base, env)

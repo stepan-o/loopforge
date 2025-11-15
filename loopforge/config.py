@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 
 DEFAULT_DB_URL = "postgresql+psycopg://loopforge:loopforge@localhost:5432/loopforge"
@@ -69,3 +70,23 @@ def get_action_log_path() -> Path:
     for a given run, or pass `action_log_path` directly to `run_simulation`.
     """
     return Path(os.getenv("ACTION_LOG_PATH", "logs/loopforge_actions.jsonl"))
+
+
+# --- Perception mode (Phase 8 opt-in) ---------------------------------------
+# Environment variable PERCEPTION_MODE controls shaping; defaults to "accurate".
+# Allowed values: "accurate", "partial", "spin", "auto" (auto currently maps to accurate).
+PERCEPTION_MODE: str = os.getenv("PERCEPTION_MODE", "accurate").strip().lower()
+
+
+def get_perception_mode() -> Literal["accurate", "partial", "spin"]:
+    """Return the normalized perception mode.
+
+    - Accepts env values: accurate | partial | spin | auto
+    - Unknown values fall back to "accurate".
+    - "auto" currently behaves like "accurate" (placeholder for future heuristics).
+    """
+    raw = os.getenv("PERCEPTION_MODE", PERCEPTION_MODE or "accurate").strip().lower()
+    if raw in {"partial", "spin", "accurate"}:
+        return raw  # type: ignore[return-value]
+    # "auto" and anything else → accurate for now
+    return "accurate"

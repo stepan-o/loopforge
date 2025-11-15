@@ -111,6 +111,7 @@ class JsonlReflectionLogger:
             day_index=day_index,
             reflection=reflection,
             traits_after=traits_after,
+            perception_mode=getattr(reflection, "perception_mode", None),
         )
         with self.path.open("a", encoding="utf8") as f:
             f.write(json.dumps(entry.to_dict()) + "\n")

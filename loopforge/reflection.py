@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional
 
 from loopforge.types import ActionLogEntry, AgentReflection
 from loopforge.logging_utils import JsonlReflectionLogger
+from loopforge.config import get_perception_mode
 
 
 def filter_entries_for_day(
@@ -191,6 +192,12 @@ def run_daily_reflection_for_agent(agent: Any, entries: List[ActionLogEntry]) ->
     role = getattr(agent, "role", "")
     summary = summarize_agent_day(name, entries)
     reflection = build_agent_reflection(name, role, summary)
+    # Phase 8: tag the reflection with the active perception mode (opt-in, default accurate)
+    try:
+        reflection.perception_mode = get_perception_mode()
+    except Exception:
+        # fail-soft: missing config should not break reflections
+        reflection.perception_mode = getattr(reflection, "perception_mode", None)
     apply_reflection_to_traits(agent, reflection)
     return reflection
 

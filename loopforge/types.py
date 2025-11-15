@@ -169,12 +169,16 @@ class AgentReflection:
     # Optional tags for trait / relationship updates later.
     tags: Dict[str, bool] = field(default_factory=dict)
 
+    # Phase 8: which perception mode was active while acting this day
+    perception_mode: Optional[str] = None
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "summary_of_day": self.summary_of_day,
             "self_assessment": self.self_assessment,
             "intended_changes": self.intended_changes,
             "tags": dict(self.tags),
+            "perception_mode": self.perception_mode,
         }
 
     @classmethod
@@ -184,6 +188,7 @@ class AgentReflection:
             self_assessment=str(data.get("self_assessment", "")),
             intended_changes=str(data.get("intended_changes", "")),
             tags=dict(data.get("tags", {})),
+            perception_mode=data.get("perception_mode"),
         )
 
 
@@ -267,6 +272,8 @@ class ReflectionLogEntry:
     day_index: int
     reflection: AgentReflection
     traits_after: Dict[str, float]
+    # Phase 8: include the perception mode under which the agent operated
+    perception_mode: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -275,6 +282,7 @@ class ReflectionLogEntry:
             "day_index": self.day_index,
             "reflection": self.reflection.to_dict(),
             "traits_after": dict(self.traits_after),
+            "perception_mode": self.perception_mode,
         }
 
 

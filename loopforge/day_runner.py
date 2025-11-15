@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, List, Optional
 
-from loopforge.logging_utils import JsonlReflectionLogger
+from loopforge.logging_utils import JsonlReflectionLogger, JsonlSupervisorLogger
 from loopforge.reflection import (
     filter_entries_for_day,
     run_daily_reflections_for_all_agents,
 )
-from loopforge.types import ActionLogEntry, AgentReflection
+from loopforge.supervisor import build_supervisor_messages_for_day, set_supervisor_messages_on_env
+from loopforge.types import ActionLogEntry, AgentReflection, SupervisorMessage
 
 
 def _read_action_log(path: Path) -> List[ActionLogEntry]:
@@ -90,3 +92,92 @@ def run_one_day(
         day_index=day_index,
     )
     return reflections
+
+
+def run_one_day_with_supervisor(
+    env: Any,
+    agents: List[Any],
+    steps_per_day: int = 50,
+    day_index: int = 0,
+    action_log_path: Path = Path("logs/loopforge_actions.jsonl"),
+    reflection_log_path: Optional[Path] = None,
+    supervisor_log_path: Optional[Path] = None,
+    reflection_logger: Optional[JsonlReflectionLogger] = None,
+) -> List[SupervisorMessage]:
+    """
+    Orchestrate one simulated day and emit Supervisor messages.
+
+    - Runs the base `run_one_day(...)` to produce reflections.
+    - Builds Supervisor messages from reflections.
+    - Logs each SupervisorMessage as a JSONL line (fail-soft).
+    - Publishes messages onto the environment for the next day's perceptions
+      via env.supervisor_messages (consumed by narrative.build_agent_perception).
+
+    Notes on log path precedence (per Phase 7):
+    - SUPERVISOR_LOG_PATH env var (if present) takes precedence over all.
+    - Else, use the explicit `supervisor_log_path` parameter if provided.
+    - Else, default to logs/loopforge_supervisor.jsonl.
+
+    This helper does not change the behavior of the core simulation loop or
+    `run_simulation(...)`. It composes existing functionality and remains
+    fail-soft around logging.
+    """
+    # Prepare a reflection logger if a path was provided but no logger object
+    if reflection_logger is None and reflection_log_path is not None:
+        try:
+            reflection_logger = JsonlReflectionLogger(reflection_log_path)
+        except Exception:
+            reflection_logger = None
+
+    # Run the day and collect reflections
+    reflections = run_one_day(
+        env=env,
+        agents=agents,
+        steps_per_day=steps_per_day,
+        day_index=day_index,
+        reflection_logger=reflection_logger,
+        action_log_path=action_log_path,
+    )
+
+    # Enrich reflections with agent metadata for downstream heuristics
+    name_to_role = {getattr(a, "name", ""): getattr(a, "role", "") for a in agents}
+    for r in reflections:
+        if not hasattr(r, "agent_name"):
+            # Best-effort: try to infer name from summary if missing (optional)
+            setattr(r, "agent_name", getattr(r, "agent_name", ""))
+        # Ensure role present
+        nm = getattr(r, "agent_name", "")
+        if not hasattr(r, "role"):
+            setattr(r, "role", name_to_role.get(nm, ""))
+
+    # Build supervisor messages using heuristic
+    messages = build_supervisor_messages_for_day(reflections, day_index=day_index)
+
+    # Resolve supervisor log path with precedence
+    env_override = os.getenv("SUPERVISOR_LOG_PATH")
+    if env_override:
+        sup_path = Path(env_override)
+    elif supervisor_log_path is not None:
+        sup_path = Path(supervisor_log_path)
+    else:
+        sup_path = Path("logs/loopforge_supervisor.jsonl")
+
+    # Log messages (fail-soft)
+    try:
+        sup_logger = JsonlSupervisorLogger(sup_path)
+        for m in messages:
+            try:
+                sup_logger.write_message(m)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Publish messages onto the environment for next-day perceptions
+    try:
+        set_supervisor_messages_on_env(env, messages)
+    except Exception:
+        # Do not let this break the orchestrator
+        pass
+
+    return messages
