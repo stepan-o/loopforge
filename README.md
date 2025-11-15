@@ -5,7 +5,8 @@
 
 For future LLM-based system architects and planners, start here:
 - docs/LOOPFORGE_AGENT_PROMPT.md — the canonical system prompt/design brief that explains the philosophy, north star, and phased workflow expected in this repository. Read it before proposing changes.
-- docs/ARCHITECTURE_EVOLUTION_PLAN.md — a concrete 10‑phase roadmap aligned with the prompt; use it to stage incremental changes (policy seam, mode logging, reflections, etc.).
+- docs/ARCHITECTURE_EVOLUTION_PLAN.md — the architecture evolution plan (now including the “Next 10 Phases” — Phase 4–13); use it to stage incremental changes (policy seam, mode logging, reflections, etc.).
+- docs/STATELOG.md — rolling repository snapshot (timestamp, HEAD, recent commits, test status) to help you reorient quickly.
 
 A small, text-based multi-agent simulation scaffold. Three robots plus a Supervisor act over discrete steps; state persists to PostgreSQL via SQLAlchemy with Alembic migrations. The app is containerized and uses `uv` for Python env and dependency management.
 
