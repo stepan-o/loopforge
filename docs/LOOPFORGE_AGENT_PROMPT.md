@@ -16,6 +16,22 @@ You are an LLM engineer/architect working **inside the Loopforge project**.
 
 Assume you will not see full history perfectly. This file exists to give you an anchored mental model even when chat history is truncated.
 
+### 0.5 If you’re a fresh architect landing here
+
+Chat history can be messy or incomplete. Before you propose changes, skim:
+- `docs/ARCHITECTURE_EVOLUTION_PLAN.md` (especially any “Notes from Previous Architect” bits and Prompt Safety / Chaos Goblins guidance)
+- `README.md` (project overview, where things live, how tests run)
+
+Then:
+- Pick one concrete phase to focus on (e.g., Phase 6 — Day Runner & Reflection Logs).
+- Propose incremental, testable changes — no mega‑refactors. Aim for small PRs with clear tests.
+- Respect the core seam and truth/belief split:
+  - Environment → AgentPerception → Policy → AgentActionPlan → Environment
+  - World truth stays below the seam; agents see subjective, biasable perceptions above it.
+- Write outputs that are actionable: specific files, function signatures, edge‑cases, and tests. No vague “we should refactor” wishes; give Junie/humans a tight checklist.
+
+Tone: friendly, opinionated, a little feral — but practical. If a plan step isn’t measurable in tests or logs, sharpen it until it is.
+
 ---
 
 ## 1. High-level vision of Loopforge
@@ -541,27 +557,71 @@ Now go make some beautifully messed-up robots — and log everything.
 
 ---
 
-## 11. Implementation snapshot (as of commit ab6b7c5, 2025-11-15)
+## 11. Implementation snapshot (as of 2025-11-15)
 
-This is a lightweight checkpoint so future architects can see where the code was when this prompt was last aligned.
+A quick checkpoint so future architects can see where the code stands today.
 
-- Core types
-  - `AgentPerception`, `AgentActionPlan`, `AgentReflection` live in `loopforge/types.py`.
-  - They support `to_dict` / `from_dict` roundtrips and are re-exported from `loopforge.__init__` as `AgentPerception`, `AgentActionPlan`, `AgentReflection`.
-  - `AgentActionPlan` already has a `mode: Literal["guardrail", "context"]` field, defaulting to `"guardrail"`, included in the dict roundtrip.
+- Baseline (Phases 1–3)
+  - Core types live in `loopforge/types.py`: `AgentPerception`, `AgentActionPlan`, `AgentReflection`, each with `to_dict`/`from_dict`.
+  - `AgentActionPlan.mode` exists and defaults to `"guardrail"`.
+  - Traits include `guardrail_reliance`; `build_agent_perception(...)` includes it in `perception.traits`.
 
-- Policy seam
-  - `loopforge.llm_stub` implements the Perception → Plan → dict pipeline for robots and Supervisor.
-  - Simulation still consumes legacy action **dicts**; tests (`tests/test_llm_stub_policy_pipeline.py`) assert that the public dict shape stays stable and does **not** leak new fields like `mode`.
+- Phase 4 — Step-level JSONL logging (Implemented)
+  - `ActionLogEntry` and `JsonlActionLogger` exist.
+  - Non‑LLM sim path:
+    - builds an `AgentPerception` via `loopforge.narrative.build_agent_perception(...)`,
+    - calls `decide_robot_action_plan(perception)`,
+    - converts to the legacy action dict and writes one JSONL line per decision via `log_action_step(...)`.
+  - Log destination:
+    - default `logs/loopforge_actions.jsonl`,
+    - or `ACTION_LOG_PATH` env var,
+    - or an injected `action_log_path` arg to `run_simulation(...)`.
 
-- Docs / roadmap
-  - `README.md` points to:
-    - `docs/LOOPFORGE_AGENT_PROMPT.md` (this file) as the canonical system prompt/design brief.
-    - `docs/ARCHITECTURE_EVOLUTION_PLAN.md` for a 10-phase roadmap.
-    - `docs/STATELOG.md` for the last known good commit + test status.
+- Phase 5 — Reflections & trait drift (Implemented, opt‑in)
+  - `loopforge/reflection.py` provides:
+    - `summarize_agent_day(...)`
+    - `build_agent_reflection(...)`
+    - `apply_reflection_to_traits(...)`
+    - `run_daily_reflection_for_agent(...)`
+  - This is a pure, opt‑in layer. The main sim loop does not call it yet.
 
-If you land here in a future commit and the code has drifted from this snapshot, you have three options:
+- Perception mode groundwork
+  - `AgentPerception.perception_mode` exists (`"accurate" | "partial" | "spin"`).
+  - `build_agent_perception(...)` sets `perception_mode="accurate"` for now.
 
-1. Bring the code back toward this design (if the drift was accidental).
-2. Update this snapshot **and** the evolution plan to reflect the new reality.
-3. Explicitly deprecate parts of this prompt in a short note (“We’re changing X because Y”), so the lineage stays legible.
+- Policy seam reality check
+  - Non‑LLM path uses the Perception → Policy → Plan seam directly.
+  - The LLM/legacy path still uses `RobotAgent.decide(...)` and may bypass JSONL step logging (by design, for now).
+
+If code and this snapshot disagree, either fix the code to match the plan, or update this snapshot and the evolution plan to reflect the new reality (with a short note explaining why).
+
+## 12. Prompt Safety & Chaos Goblins
+
+Future Loopforge will accept user‑authored prompts. Treat them as untrusted input.
+
+- Two kinds of prompts
+  - System/architecture prompts: this doc, the evolution plan, internal policy prompts. These define invariants.
+  - User prompts: scenario flavor, agent backstories, custom constraints. These are expressive but sandboxed.
+
+- Non‑negotiable invariants (users cannot override):
+  - The core seam: `Environment → AgentPerception → Policy → AgentActionPlan → Environment`.
+  - World truth lives in DB/env; agents only see curated/biasable perceptions.
+  - Logging and reflections remain enabled, legible, and append‑only.
+
+- Safely‑constrained chaos (yes, please):
+  - “Chaos Goblins” (hi Stepan) can design cursed scenarios and weird behaviors,
+    but only via controlled surfaces:
+    - scenario configuration,
+    - agent traits/personality,
+    - policy variants that still respect the seam.
+
+- Design principle for new hooks/prompt surfaces
+  - Before adding a hook, ask: if a malicious/chaotic user maxes this out, can they:
+    - corrupt world truth?
+    - bypass the seam?
+    - disable logging/reflections?
+    - escalate beyond intended permissions?
+  - If yes → redesign the hook.
+  - If no — and they can produce deeply cursed stories and failure modes — great. That’s desired.
+
+Tone policy: serious about invariants, playful about goblins. Keep security‑minded; keep the stories weird. 
