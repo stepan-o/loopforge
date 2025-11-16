@@ -147,6 +147,11 @@ def view_episode(
     supervisor_log_path: Path | None = typer.Option(None, help="Path to supervisor JSONL (optional, unused for now)"),
     steps_per_day: int = typer.Option(50, help="Number of steps per simulated day"),
     days: int = typer.Option(3, help="Number of days to include in the episode"),
+    narrative: bool = typer.Option(
+        False,
+        "--narrative",
+        help="Print day-level narrative snippets in addition to numeric stats.",
+    ),
 ) -> None:
     """Summarize a multi-day Loopforge episode from JSONL logs."""
     # Compute day summaries using the shared compute path
@@ -161,6 +166,14 @@ def view_episode(
 
     episode = summarize_episode(day_summaries)
     _print_episode_summary(episode)
+
+    if narrative:
+        from loopforge.narrative_viewer import build_day_narrative
+        typer.echo("\nDAY NARRATIVES")
+        typer.echo("==============================")
+        for idx, day in enumerate(episode.days):
+            dn = build_day_narrative(day, idx)
+            _print_day_narrative(dn)
 
 
 def _print_episode_summary(episode: EpisodeSummary) -> None:
@@ -246,3 +259,30 @@ def _print_episode_summary(episode: EpisodeSummary) -> None:
 
 if __name__ == "__main__":
     app()
+
+
+
+def _print_day_narrative(dn):
+    """Pretty-print a DayNarrative produced by narrative_viewer."""
+    try:
+        import typer as _ty
+    except Exception:  # fail-soft; fallback to print
+        _ty = None
+
+    def _echo(s: str):
+        if _ty is not None:
+            _ty.echo(s)
+        else:
+            print(s)
+
+    _echo(f"\nDay {dn.day_index} — {dn.day_intro}")
+    for beat in dn.agent_beats:
+        _echo(f"  [{beat.name} ({beat.role})]")
+        _echo(f"    {beat.intro}")
+        _echo(f"    {beat.perception_line}")
+        _echo(f"    {beat.actions_line}")
+        _echo(f"    {beat.closing_line}")
+    if dn.supervisor_line:
+        _echo(f"  Supervisor: {dn.supervisor_line}")
+    if dn.day_outro:
+        _echo(f"  {dn.day_outro}")
