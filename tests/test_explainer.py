@@ -11,6 +11,97 @@ from loopforge.explainer import explain_agent_episode
 from scripts.run_simulation import app as cli_app
 
 
+def test_explainer_low_low_arc():
+    # Low -> Low trajectory should use the special steady-low phrasing
+    agent_ctx = {
+        "agent_name": "Nova",
+        "agent": {
+            "role": "qa",
+            "vibe": None,
+            "tagline": None,
+            "stress_start": 0.06,
+            "stress_end": 0.00,
+            "stress_arc": "falling",  # even if arc would be 'falling', special case should override wording
+            "guardrail_total": 1,
+            "context_total": 1,
+            "guardrail_ratio": 0.5,
+        },
+        "episode_meta": {"tension_direction": "flat"},
+        "per_day": [],
+    }
+    text = explain_agent_episode(agent_ctx)
+    low = text.lower()
+    assert "held steady" in low and "low" in low
+    assert "gradually unwound" not in low
+    assert "moderate" not in low
+
+
+def test_explainer_near_zero_end():
+    # End stress near zero should append the phrase "almost zero" inline (no standalone sentence)
+    agent_ctx = {
+        "agent_name": "Sprocket",
+        "agent": {
+            "role": "maintenance",
+            "vibe": None,
+            "tagline": None,
+            "stress_start": 0.20,
+            "stress_end": 0.02,  # < 0.03 threshold
+            "stress_arc": "falling",
+            "guardrail_total": 3,
+            "context_total": 2,
+            "guardrail_ratio": 3 / 5,
+        },
+        "episode_meta": {"tension_direction": "falling"},
+        "per_day": [],
+    }
+    text = explain_agent_episode(agent_ctx)
+    low = text.lower()
+    assert ", down to almost zero." in low
+    # Ensure no standalone sentence form
+    assert "Down to almost zero." not in text
+
+
+def test_explainer_role_flavor():
+    # Known roles include their flavor line; unknown roles do not
+    known_ctx = {
+        "agent_name": "Delta",
+        "agent": {
+            "role": "qa",
+            "vibe": None,
+            "tagline": None,
+            "stress_start": 0.10,
+            "stress_end": 0.12,
+            "stress_arc": "rising",
+            "guardrail_total": 2,
+            "context_total": 1,
+            "guardrail_ratio": 2 / 3,
+        },
+        "episode_meta": {"tension_direction": "rising"},
+        "per_day": [],
+    }
+    txt_known = explain_agent_episode(known_ctx)
+    assert "As a qa, they are ever vigilant for faults and inconsistencies." in txt_known
+
+    unknown_ctx = {
+        "agent_name": "Ghost",
+        "agent": {
+            "role": "unknown",
+            "vibe": None,
+            "tagline": None,
+            "stress_start": 0.05,
+            "stress_end": 0.05,
+            "stress_arc": "flat",
+            "guardrail_total": 0,
+            "context_total": 0,
+            "guardrail_ratio": 0.0,
+        },
+        "episode_meta": {"tension_direction": "flat"},
+        "per_day": [],
+    }
+    txt_unknown = explain_agent_episode(unknown_ctx)
+    assert "As a unknown," not in txt_unknown
+
+
 def _mk_day(idx: int, tension: float, stats: dict[str, AgentDayStats]) -> DaySummary:
     return DaySummary(
         day_index=idx,
