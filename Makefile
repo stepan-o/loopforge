@@ -109,6 +109,10 @@ docker-logs:
 run-day:
 	$(UV) run loopforge-sim view-day
 
+# Dev cockpit: summarize an episode from logs
+run-episode:
+	$(UV) run loopforge-sim view-episode
+
 # Coverage run
 .PHONY: test-cov
 test-cov:

@@ -12,6 +12,7 @@ from loopforge.reflection import (
 )
 from loopforge.supervisor import build_supervisor_messages_for_day, set_supervisor_messages_on_env
 from loopforge.types import ActionLogEntry, AgentReflection, SupervisorMessage
+from loopforge.reporting import DaySummary, summarize_day
 
 
 def _read_action_log(path: Path) -> List[ActionLogEntry]:
@@ -24,6 +25,49 @@ def _read_action_log(path: Path) -> List[ActionLogEntry]:
         return read_action_log_entries(Path(path))
     except Exception:
         return []
+
+
+def compute_day_summary(
+    day_index: int,
+    action_log_path: Path = Path("logs/loopforge_actions.jsonl"),
+    steps_per_day: int = 50,
+) -> DaySummary:
+    """Read logs, slice the selected day, run reflections, and summarize.
+
+    This remains read-only over JSONL logs. Reflections are computed using
+    the existing day runner helper over the sliced entries using lightweight
+    agent stubs inferred from the entries (name/role only).
+    """
+    # Read all entries and slice the window
+    all_entries = _read_action_log(action_log_path)
+    day_entries = filter_entries_for_day(all_entries, day_index, steps_per_day)
+
+    # Build agent stubs for reflections based on entries
+    agent_roles: dict[str, str] = {}
+    for e in day_entries:
+        agent_roles.setdefault(e.agent_name, e.role)
+    agents = [type("AgentStub", (), {"name": n, "role": r, "traits": {}})() for n, r in sorted(agent_roles.items())]
+
+    # Run reflections (read-only) without logging to file
+    reflections: List[AgentReflection] = run_daily_reflections_for_all_agents(
+        agents=agents,
+        entries=day_entries,
+        logger=None,
+        day_index=day_index,
+        episode_index=None,
+    )
+    reflections_by_agent = {}
+    for agent_obj, refl in zip(agents, reflections):
+        # enrich reflection with name/role for consistency and map by name
+        try:
+            setattr(refl, "agent_name", getattr(agent_obj, "name", ""))
+            setattr(refl, "role", getattr(agent_obj, "role", ""))
+        except Exception:
+            pass
+        reflections_by_agent[getattr(agent_obj, "name", "")] = refl
+
+    # Build the day summary
+    return summarize_day(day_index=day_index, entries=day_entries, reflections_by_agent=reflections_by_agent)
 
 
 def run_one_day(
