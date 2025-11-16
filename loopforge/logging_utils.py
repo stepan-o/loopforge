@@ -11,6 +11,7 @@ from loopforge.types import (
     ReflectionLogEntry,
     AgentReflection,
     SupervisorMessage,
+    EpisodeTensionSnapshot,
 )
 
 
@@ -140,3 +141,29 @@ class JsonlSupervisorLogger:
         with self.path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(message.to_dict()))
             f.write("\n")
+
+
+class JsonlWeaveLogger:
+    """
+    JSONL writer for episode weave snapshots.
+
+    Writes one EpisodeTensionSnapshot per line via snapshot.to_dict().
+    Fail-soft: I/O issues are swallowed to avoid impacting callers.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = Path(path)
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            # fail-soft on directory creation
+            pass
+
+    def write_snapshot(self, snapshot: EpisodeTensionSnapshot) -> None:
+        try:
+            with self.path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(snapshot.to_dict()))
+                f.write("\n")
+        except Exception:
+            # fail-soft
+            pass

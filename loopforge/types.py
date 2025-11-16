@@ -38,6 +38,81 @@ class SupervisorIntentSnapshot:
         )
 
 
+# --- EpisodeTensionSnapshot (Phase 9 Lite: Weave) ----------------------------
+
+
+@dataclass
+class EpisodeTensionSnapshot:
+    """Episode-level roll-up snapshot derived purely from logs.
+
+    Pure, JSON-safe. No DB coupling. Intended to be written as JSONL lines
+    by a dedicated weave logger.
+    """
+
+    episode_index: int
+    num_days: int
+    num_actions: int
+    num_reflections: int
+
+    # Aggregated metrics
+    incident_rate: float
+    belief_rate: float  # from perception_mode drift
+    guardrail_rate: float
+    context_rate: float
+
+    # Supervisor perception rates from reflections
+    punitive_rate: float
+    supportive_rate: float
+    apathetic_rate: float
+
+    # Emotional climate (optional v1)
+    avg_stress: Optional[float] = None
+    avg_satisfaction: Optional[float] = None
+
+    # High-level roll-up
+    tension_index: float = 0.0
+    notes: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "episode_index": int(self.episode_index),
+            "num_days": int(self.num_days),
+            "num_actions": int(self.num_actions),
+            "num_reflections": int(self.num_reflections),
+            "incident_rate": float(self.incident_rate),
+            "belief_rate": float(self.belief_rate),
+            "guardrail_rate": float(self.guardrail_rate),
+            "context_rate": float(self.context_rate),
+            "punitive_rate": float(self.punitive_rate),
+            "supportive_rate": float(self.supportive_rate),
+            "apathetic_rate": float(self.apathetic_rate),
+            "avg_stress": None if self.avg_stress is None else float(self.avg_stress),
+            "avg_satisfaction": None if self.avg_satisfaction is None else float(self.avg_satisfaction),
+            "tension_index": float(self.tension_index),
+            "notes": str(self.notes or ""),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "EpisodeTensionSnapshot":
+        return cls(
+            episode_index=int(data.get("episode_index", 0)),
+            num_days=int(data.get("num_days", 0)),
+            num_actions=int(data.get("num_actions", 0)),
+            num_reflections=int(data.get("num_reflections", 0)),
+            incident_rate=float(data.get("incident_rate", 0.0)),
+            belief_rate=float(data.get("belief_rate", 0.0)),
+            guardrail_rate=float(data.get("guardrail_rate", 0.0)),
+            context_rate=float(data.get("context_rate", 0.0)),
+            punitive_rate=float(data.get("punitive_rate", 0.0)),
+            supportive_rate=float(data.get("supportive_rate", 0.0)),
+            apathetic_rate=float(data.get("apathetic_rate", 0.0)),
+            avg_stress=(None if data.get("avg_stress") is None else float(data.get("avg_stress"))),
+            avg_satisfaction=(None if data.get("avg_satisfaction") is None else float(data.get("avg_satisfaction"))),
+            tension_index=float(data.get("tension_index", 0.0)),
+            notes=str(data.get("notes", "")),
+        )
+
+
 # --- AgentPerception --------------------------------------------------------
 
 
