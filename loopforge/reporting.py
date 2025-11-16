@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Iterable
 
 from .types import ActionLogEntry, AgentReflection
+from .characters import CHARACTERS
 
 
 @dataclass
@@ -36,6 +37,10 @@ class AgentEpisodeStats:
     stress_start: Optional[float]
     stress_end: Optional[float]
     representative_reflection: Optional[AgentReflection]
+    # Character flavor for reporting (from loopforge.characters)
+    visual: str = ""
+    vibe: str = ""
+    tagline: str = ""
 
 
 @dataclass
@@ -171,6 +176,7 @@ def summarize_episode(day_summaries: List[DaySummary]) -> EpisodeSummary:
     - Captures stress arc start→end per agent using avg_stress from Day 0/last day.
     - Placeholder trait deltas: empty dict (no trait snapshots wired yet).
     - Representative reflection: choose the last non-null reflection seen across days.
+    - Enriches AgentEpisodeStats with character flavor (visual/vibe/tagline) from CHARACTERS.
     """
     agents: Dict[str, AgentEpisodeStats] = {}
 
@@ -199,6 +205,12 @@ def summarize_episode(day_summaries: List[DaySummary]) -> EpisodeSummary:
             if s.reflection is not None:
                 rep_reflection = s.reflection
 
+        # Character flavor lookup (safe fallback to empty strings)
+        spec = CHARACTERS.get(name, {})
+        visual = spec.get("visual", "") if isinstance(spec, dict) else ""
+        vibe = spec.get("vibe", "") if isinstance(spec, dict) else ""
+        tagline = spec.get("tagline", "") if isinstance(spec, dict) else ""
+
         agents[name] = AgentEpisodeStats(
             name=name,
             role=role,
@@ -208,6 +220,9 @@ def summarize_episode(day_summaries: List[DaySummary]) -> EpisodeSummary:
             stress_start=stress_start,
             stress_end=stress_end,
             representative_reflection=rep_reflection,
+            visual=visual,
+            vibe=vibe,
+            tagline=tagline,
         )
 
     tension_trend = [d.tension_score for d in day_summaries]

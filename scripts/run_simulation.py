@@ -23,6 +23,20 @@ from collections import Counter, defaultdict
 app = typer.Typer(add_completion=False, help="Run the Loopforge City simulation loop")
 
 
+# Allow invoking the module without an explicit subcommand, e.g.:
+#   uv run python -m scripts.run_simulation --no-db --steps 10
+# This preserves backward compatibility with the Makefile target `make run`.
+@app.callback(invoke_without_command=True)
+def _root(
+    ctx: typer.Context,
+    steps: int = typer.Option(None, "--steps", "-n", help="Number of simulation steps to run"),
+    no_db: bool = typer.Option(False, "--no-db", help="Run without database persistence (in-memory test)"),
+) -> None:
+    if ctx.invoked_subcommand is None:
+        # Defer to the main run command implementation
+        main(steps=steps, no_db=no_db)
+
+
 @app.command()
 def main(
     steps: int = typer.Option(None, "--steps", "-n", help="Number of simulation steps to run"),
@@ -177,22 +191,39 @@ def _print_episode_summary(episode: EpisodeSummary) -> None:
         width = 0
     for name in sorted(episode.agents.keys()):
         a = episode.agents[name]
-        typer.echo(f"{name} ({a.role})")
-        typer.echo(f"  Guardrail vs context (episode): {a.guardrail_total} / {a.context_total}")
+        # Header
+        typer.echo(f"{name}")
+        typer.echo("-" * len(name))
+        # Role + vibe
+        if getattr(a, "vibe", ""):
+            typer.echo(f"Role: {a.role} — {a.vibe}")
+        else:
+            typer.echo(f"Role: {a.role}")
+        # Visual
+        if getattr(a, "visual", ""):
+            typer.echo(f"Visual: {a.visual}")
+        # Tagline
+        if getattr(a, "tagline", ""):
+            typer.echo(f"Tagline: “{a.tagline}”")
+        # Guardrail/context totals
+        typer.echo(f"Guardrail vs context (episode): {a.guardrail_total} / {a.context_total}")
+        # Stress arc
         if a.stress_start is not None and a.stress_end is not None:
             trend = "rising" if a.stress_end > a.stress_start else ("falling" if a.stress_end < a.stress_start else "flat")
-            typer.echo(f"  Stress arc: {a.stress_start:.2f} → {a.stress_end:.2f} ({trend})")
+            typer.echo(f"Stress arc: {a.stress_start:.2f} → {a.stress_end:.2f} ({trend})")
         else:
-            typer.echo("  Stress arc: n/a")
+            typer.echo("Stress arc: n/a")
+        # Traits placeholder/deltas
         if a.trait_deltas:
-            # Placeholder printing; real deltas will be populated in later phases
             deltas = ", ".join(f"{k}: {v:+.2f}" for k, v in a.trait_deltas.items())
-            typer.echo(f"  Traits: {deltas}")
+            typer.echo(f"Traits: {deltas}")
         else:
-            typer.echo("  Traits: (deltas not tracked)")
+            typer.echo("Traits: (deltas not tracked)")
+        # Reflection quote snippet (first line)
         if a.representative_reflection and getattr(a.representative_reflection, "summary_of_day", ""):
-            quote = a.representative_reflection.summary_of_day
-            typer.echo(f"  Reflection: \"{quote}\"")
+            quote_full = a.representative_reflection.summary_of_day.strip()
+            quote_one_line = quote_full.split("\n")[0]
+            typer.echo(f"Reflection: “{quote_one_line}”")
         typer.echo("")
 
     # Tension trend and simple canaries
