@@ -152,6 +152,11 @@ def view_episode(
         "--narrative",
         help="Print day-level narrative snippets in addition to numeric stats.",
     ),
+    recap: bool = typer.Option(
+        False,
+        "--recap",
+        help="Print an episode-level recap and per-agent spotlights.",
+    ),
 ) -> None:
     """Summarize a multi-day Loopforge episode from JSONL logs."""
     # Compute day summaries using the shared compute path
@@ -166,6 +171,23 @@ def view_episode(
 
     episode = summarize_episode(day_summaries)
     _print_episode_summary(episode)
+
+    if recap:
+        try:
+            from loopforge.episode_recaps import build_episode_recap
+            from loopforge.characters import CHARACTERS
+        except Exception:
+            build_episode_recap = None
+            CHARACTERS = {}
+        if build_episode_recap is not None:
+            recap_obj = build_episode_recap(episode, episode.days, CHARACTERS)
+            typer.echo("\nEPISODE RECAP")
+            typer.echo("=" * 30)
+            typer.echo(recap_obj.intro)
+            # Deterministic ordering of agents
+            for name in sorted(recap_obj.per_agent_blurbs.keys()):
+                typer.echo(f"- {name}: {recap_obj.per_agent_blurbs[name]}")
+            typer.echo(recap_obj.closing)
 
     if narrative:
         from loopforge.narrative_viewer import build_day_narrative

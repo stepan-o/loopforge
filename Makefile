@@ -107,13 +107,25 @@ docker-logs:
 
 # Dev cockpit: summarize one day from logs
 run-day:
-	$(UV) run loopforge-sim view-day
+	$(UV) run loopforge-sim view-day $(ARGS)
 
 # Dev cockpit: summarize an episode from logs
+# Pass extra CLI flags via ARGS, e.g.: make run-episode ARGS="--recap --narrative"
 run-episode:
-	$(UV) run loopforge-sim view-episode
+	$(UV) run loopforge-sim view-episode $(ARGS)
+
+# Allow the accidental pattern `make run-episode -- RECAPPED` to succeed by
+# treating `--` and `RECAPPED` as no-op phony targets.
+.PHONY: -- RECAPPED
+--:
+RECAPPED:
 
 # Coverage run
 .PHONY: test-cov
 test-cov:
 	$(UV) run pytest --cov=loopforge --cov-report=term-missing
+
+
+# Dev cockpit: episode recap (episode + recap output)
+run-recap:
+	$(UV) run loopforge-sim view-episode --recap
