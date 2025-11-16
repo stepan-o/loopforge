@@ -39,6 +39,9 @@ def log_action_step(
     plan: AgentActionPlan,
     action: Dict[str, Any],
     outcome: Optional[str] = None,
+    *,
+    episode_index: Optional[int] = None,
+    day_index: Optional[int] = None,
 ) -> None:
     entry = ActionLogEntry(
         step=perception.step,
@@ -53,6 +56,8 @@ def log_action_step(
         outcome=outcome,
         raw_action=dict(action),
         perception=perception.to_dict(),
+        episode_index=episode_index,
+        day_index=day_index,
     )
     # Logging must not crash the sim; swallow exceptions.
     try:
@@ -104,6 +109,8 @@ class JsonlReflectionLogger:
         day_index: int,
         reflection: AgentReflection,
         traits_after: Dict[str, float],
+        *,
+        episode_index: Optional[int] = None,
     ) -> None:
         entry = ReflectionLogEntry(
             agent_name=agent_name,
@@ -113,6 +120,7 @@ class JsonlReflectionLogger:
             traits_after=traits_after,
             perception_mode=getattr(reflection, "perception_mode", None),
             supervisor_perceived_intent=getattr(reflection, "supervisor_perceived_intent", None),
+            episode_index=episode_index,
         )
         with self.path.open("a", encoding="utf8") as f:
             f.write(json.dumps(entry.to_dict()) + "\n")

@@ -59,6 +59,8 @@ def run_one_day(
     day_index: int = 0,
     reflection_logger: Optional[JsonlReflectionLogger] = None,
     action_log_path: Path = Path("logs/loopforge_actions.jsonl"),
+    *,
+    episode_index: Optional[int] = None,
 ) -> List[AgentReflection]:
     """
     - Run `steps_per_day` environment steps.
@@ -90,6 +92,7 @@ def run_one_day(
         entries=day_entries,
         logger=reflection_logger,
         day_index=day_index,
+        episode_index=episode_index,
     )
     return reflections
 
@@ -103,6 +106,8 @@ def run_one_day_with_supervisor(
     reflection_log_path: Optional[Path] = None,
     supervisor_log_path: Optional[Path] = None,
     reflection_logger: Optional[JsonlReflectionLogger] = None,
+    *,
+    episode_index: Optional[int] = None,
 ) -> List[SupervisorMessage]:
     """
     Orchestrate one simulated day and emit Supervisor messages.
@@ -137,6 +142,7 @@ def run_one_day_with_supervisor(
         day_index=day_index,
         reflection_logger=reflection_logger,
         action_log_path=action_log_path,
+        episode_index=episode_index,
     )
 
     # Enrich reflections with agent metadata for downstream heuristics
@@ -154,6 +160,14 @@ def run_one_day_with_supervisor(
 
     # Build supervisor messages using heuristic
     messages = build_supervisor_messages_for_day(reflections, day_index=day_index)
+
+    # Tag messages with episode index for Phase 10 (log-level only)
+    if episode_index is not None:
+        for m in messages:
+            try:
+                setattr(m, "episode_index", episode_index)
+            except Exception:
+                pass
 
     # Resolve supervisor log path with precedence
     env_override = os.getenv("SUPERVISOR_LOG_PATH")
@@ -183,3 +197,47 @@ def run_one_day_with_supervisor(
         pass
 
     return messages
+
+
+def run_episode(
+    env: Any,
+    agents: List[Any],
+    num_days: int,
+    steps_per_day: int,
+    *,
+    persist_to_db: bool,
+    episode_index: int = 0,
+    action_log_path: Optional[Path] = None,
+    reflection_log_path: Optional[Path] = None,
+    supervisor_log_path: Optional[Path] = None,
+) -> None:
+    """Run a multi-day episode of Loopforge.
+
+    Each day reuses the same DB (if persist_to_db=True) but is tagged with
+    (episode_index, day_index) in logs for later analysis.
+
+    This orchestrator composes the existing `run_one_day_with_supervisor(...)`
+    helper across multiple day windows. It does not alter simulation semantics.
+    """
+    # Prepare an optional reflection logger once for reuse
+    reflection_logger: Optional[JsonlReflectionLogger] = None
+    if reflection_log_path is not None:
+        try:
+            reflection_logger = JsonlReflectionLogger(reflection_log_path)
+        except Exception:
+            reflection_logger = None
+
+    for day_idx in range(num_days):
+        # For each day, delegate to the day orchestrator with labels
+        run_one_day_with_supervisor(
+            env=env,
+            agents=agents,
+            steps_per_day=steps_per_day,
+            day_index=day_idx,
+            action_log_path=action_log_path or Path("logs/loopforge_actions.jsonl"),
+            reflection_log_path=None if reflection_logger is not None else reflection_log_path,
+            supervisor_log_path=supervisor_log_path,
+            reflection_logger=reflection_logger,
+            episode_index=episode_index,
+        )
+    # No return; side effects are logs and optional env mailbox for next-day perceptions

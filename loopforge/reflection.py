@@ -228,6 +228,8 @@ def run_daily_reflections_for_all_agents(
     entries: List[ActionLogEntry],
     logger: Optional[JsonlReflectionLogger],
     day_index: int,
+    *,
+    episode_index: Optional[int] = None,
 ) -> List[AgentReflection]:
     """
     For each agent:
@@ -251,6 +253,7 @@ def run_daily_reflections_for_all_agents(
                     day_index=day_index,
                     reflection=refl,
                     traits_after={k: float(v) for k, v in getattr(agent, "traits", {}).items()},
+                    episode_index=episode_index,
                 )
             except Exception:
                 # fail-soft

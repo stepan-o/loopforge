@@ -276,6 +276,10 @@ class ActionLogEntry:
     # Optional, used in later phases to tag which policy produced the action
     policy_name: Optional[str] = None
 
+    # Phase 10 (episodes): optional episode/day labels for log analysis only
+    episode_index: Optional[int] = None
+    day_index: Optional[int] = None
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "step": self.step,
@@ -291,6 +295,8 @@ class ActionLogEntry:
             "raw_action": dict(self.raw_action),
             "perception": dict(self.perception),
             "policy_name": self.policy_name,
+            "episode_index": self.episode_index,
+            "day_index": self.day_index,
         }
 
     @classmethod
@@ -310,6 +316,8 @@ class ActionLogEntry:
             raw_action=dict(data.get("raw_action", {})),
             perception=dict(data.get("perception", {})),
             policy_name=data.get("policy_name"),
+            episode_index=data.get("episode_index"),
+            day_index=data.get("day_index"),
         )
 
 
@@ -321,13 +329,15 @@ class ActionLogEntry:
 class ReflectionLogEntry:
     agent_name: str
     role: str
-    day_index: int
+    day_index: Optional[int]
     reflection: AgentReflection
     traits_after: Dict[str, float]
     # Phase 8: include the perception mode under which the agent operated
     perception_mode: Optional[str] = None
     # Phase 9: include the perceived supervisor intent (compact string)
     supervisor_perceived_intent: Optional[str] = None
+    # Phase 10: optional episode/day labels (day_index kept for backward compat)
+    episode_index: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -338,6 +348,7 @@ class ReflectionLogEntry:
             "traits_after": dict(self.traits_after),
             "perception_mode": self.perception_mode,
             "supervisor_perceived_intent": self.supervisor_perceived_intent,
+            "episode_index": self.episode_index,
         }
 
 
@@ -363,6 +374,9 @@ class SupervisorMessage:
     # Text the agent actually "sees"
     body: str
 
+    # Optional episode label for log analysis (Phase 10)
+    episode_index: Optional[int] = None
+
     # Extra flags for analysis
     tags: Dict[str, bool] = field(default_factory=dict)
 
@@ -373,5 +387,6 @@ class SupervisorMessage:
             "day_index": self.day_index,
             "intent": self.intent,
             "body": self.body,
+            "episode_index": self.episode_index,
             "tags": dict(self.tags),
         }
