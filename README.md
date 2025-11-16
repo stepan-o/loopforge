@@ -1,3 +1,9 @@
+# 🌆 Loopforge — What This Project Really Is
+
+Loopforge is a robot drama machine. It’s built with a storytelling‑first philosophy: we simulate days to cut episodes that are surprising to watch and easy to explain. Every narrative layer is deterministic and telemetry‑driven so that what you see can be audited and reasoned about by engineers and future AI. Start with the vision to understand the creative North Star that guides all technical choices.
+
+[Full Producer Vision → docs/PRODUCER_VISION.md]
+
 # Loopforge City
 
 # LOOPFORGE LLM BUILDER PROMPT
@@ -582,3 +588,110 @@ If the model response is invalid or the API is unavailable, the code automatical
 - Richer narrative prompts or parsing: `loopforge/narrative.py` and `loopforge/llm_stub.py` → expand `AgentPerception`/`AgentActionPlan` and the adapters without touching the loop.
 - DB schema evolution: `loopforge/models.py` then create a migration via `make revision NAME="..."` and `make migrate`.
 
+
+
+---
+
+## Cinematic Debugger — Watch Days and Episodes (read-only over logs)
+
+This repository now includes a developer-facing “cinematic debugger” that turns telemetry into readable story-like summaries. It is pure, deterministic, and does not change simulation behavior. Detailed docs live in `docs/CINEMATIC_DEBUGGER.md`.
+
+Key layers (all read-only, telemetry-only):
+- Day Narratives: `--narrative` (per-day story beats)
+- Episode Recaps: `--recap` (episode-level intro + per-agent blurbs)
+- Daily Narrative Logs: `--daily-log` (ops-style daily shift report)
+- Agent Explainer: `explain-episode` (short, deterministic paragraph for one agent)
+- LLM Lens (scaffolding): `lens-agent` (typed inputs + deterministic fake outputs)
+
+### Watch an episode from logs (multi-day)
+
+Use the CLI to read JSONL logs and render an episode summary. Numbers come from `ActionLogEntry → DaySummary → EpisodeSummary` only.
+
+```bash
+# Basic episode view (numeric per-day blocks + character sheets)
+uv run loopforge-sim view-episode --steps-per-day 20 --days 3
+
+# Add day-level story snippets
+uv run loopforge-sim view-episode --steps-per-day 20 --days 3 --narrative
+
+# Add episode recap + per-agent spotlights
+uv run loopforge-sim view-episode --steps-per-day 20 --days 3 --recap
+
+# Add ops-style daily logs
+uv run loopforge-sim view-episode --steps-per-day 20 --days 3 --daily-log
+
+# Combine all three
+uv run loopforge-sim view-episode --steps-per-day 20 --days 3 --narrative --recap --daily-log
+```
+
+Makefile convenience targets (pass extra flags via `ARGS`):
+
+```bash
+# Generate logs quickly (no DB)
+make run
+
+# Episode viewer
+make run-episode
+make run-episode ARGS="--narrative --recap --daily-log"
+
+# Day viewer
+make run-day ARGS="--day-index 1 --steps-per-day 25"
+
+# Dedicated recap shortcut
+make run-recap
+```
+
+### Agent explainer (deterministic, pre‑LLM)
+
+Explain one agent’s arc using telemetry-only rules and character flavor:
+
+```bash
+uv run loopforge-sim explain-episode --steps-per-day 20 --days 3 --agent Delta
+```
+
+### LLM lens scaffolding (typed contracts + fake outputs)
+
+Build/show the perception lens input and a deterministic “fake LLM” output for one agent on a day:
+
+```bash
+uv run loopforge-sim lens-agent --agent Delta --steps-per-day 20 --day-index 0
+```
+
+Types and helpers: `loopforge/llm_lens.py` (no external calls; safe for CI).
+
+### Characters (style, not behavior)
+
+A canonical character registry is available at `loopforge/characters.py` and the full lore in `docs/CHARACTER_BIBLE.md`. Reporting layers pull `visual`, `vibe`, and `tagline` from this registry to enrich character sheets and intros. Adding new agents? Give them an entry in `CHARACTERS` so they appear with personality.
+
+### Logging paths and precedence (JSONL, fail‑soft)
+
+- Action log path precedence: explicit `run_simulation(..., action_log_path=...)` > `ACTION_LOG_PATH` env var > default `logs/loopforge_actions.jsonl`.
+- Supervisor log path precedence: `SUPERVISOR_LOG_PATH` env var > explicit `supervisor_log_path` param > default `logs/loopforge_supervisor.jsonl`.
+- Readers are fail‑soft via `logging_utils.read_action_log_entries(path)` (malformed lines are skipped).
+
+### Perception shaping (opt‑in)
+
+- `PERCEPTION_MODE` env var: `accurate` (default), `partial`, `spin`.
+- Helper `config.get_perception_mode()` normalizes unknown values back to `accurate`.
+- Shaping is applied at the seam in `narrative.build_agent_perception(...)`; it only affects perception text fields, never core facts or numbers.
+
+### CLI cheat sheet
+
+```bash
+# 1) Run a short sim (no DB)
+uv run loopforge-sim --no-db --steps 60
+
+# 2) Watch an episode from logs (add flags for narrative/recap/daily-log)
+uv run loopforge-sim view-episode --steps-per-day 20 --days 3 --narrative --recap --daily-log
+
+# 3) Explain one agent’s episode (deterministic)
+uv run loopforge-sim explain-episode --steps-per-day 20 --days 3 --agent Delta
+
+# 4) Future LLM lens scaffolding (typed input + deterministic fake output)
+uv run loopforge-sim lens-agent --agent Delta --steps-per-day 20 --day-index 0
+```
+
+Notes:
+- All narrative layers are pure, deterministic, and read‑only over logs.
+- Numeric stats are telemetry‑only; reflections and text never change counts.
+- See `docs/CINEMATIC_DEBUGGER.md` for a deeper “how to read it” guide.

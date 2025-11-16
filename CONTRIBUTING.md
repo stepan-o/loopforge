@@ -68,3 +68,16 @@ Include context in the body when helpful.
 
 - Keep code idiomatic and consistent with the surrounding module.
 - Prefer small, focused commits with clear messages.
+
+
+## 🎭 Producer Rules of Development
+
+These rules define the creative intent of Loopforge. Every technical contribution must follow them.
+
+1. If it doesn’t help story or insight, cut it.
+2. Every infra sprint must be followed by a visible output sprint.
+3. No black boxes — every system must be narratable.
+4. Keep the Perception → Policy → Plan seam holy.
+5. Make it fun to watch — boring episodes are bugs.
+
+Full vision: docs/PRODUCER_VISION.md

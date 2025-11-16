@@ -1,5 +1,12 @@
 # ARCHITECTURE_EVOLUTION_PLAN
 
+## 🎬 Context — The Producer North Star
+
+For full creative intent, see the Producer Vision:
+docs/PRODUCER_VISION.md
+
+The architecture exists to support episode-level narrative and interpretable AI psychology. All phases should remain aligned with that North Star.
+
 ## LOOPFORGE — Unified Architecture Evolution Plan
 
 This document describes the canonical roadmap for Loopforge’s architecture.
