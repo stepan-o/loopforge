@@ -157,6 +157,11 @@ def view_episode(
         "--recap",
         help="Print an episode-level recap and per-agent spotlights.",
     ),
+    daily_log: bool = typer.Option(
+        False,
+        "--daily-log",
+        help="Print compact daily narrative logs (intro, agent beats, general beats, closing).",
+    ),
 ) -> None:
     """Summarize a multi-day Loopforge episode from JSONL logs."""
     # Compute day summaries using the shared compute path
@@ -197,6 +202,32 @@ def view_episode(
             prev = episode.days[idx - 1] if idx > 0 else None
             dn = build_day_narrative(day, idx, previous_day_summary=prev)
             _print_day_narrative(dn)
+
+    if daily_log:
+        try:
+            from loopforge.daily_logs import build_daily_log
+        except Exception:
+            build_daily_log = None
+        if build_daily_log is not None:
+            typer.echo("\nDAILY LOG")
+            typer.echo("----------")
+            for idx, day in enumerate(episode.days):
+                prev = episode.days[idx - 1] if idx > 0 else None
+                log = build_daily_log(day, idx, previous_day_summary=prev)
+                # Render
+                typer.echo(f"\nDay {log.day_index}")
+                typer.echo(f"{log.intro}")
+                # Agent sections in deterministic order
+                for agent_name in sorted(log.agent_beats.keys()):
+                    typer.echo(f"[{agent_name}]")
+                    for line in log.agent_beats[agent_name]:
+                        typer.echo(f"- {line}")
+                if log.general_beats:
+                    typer.echo("General:")
+                    for line in log.general_beats:
+                        typer.echo(f"- {line}")
+                if log.closing:
+                    typer.echo(log.closing)
 
 
 def _print_episode_summary(episode: EpisodeSummary) -> None:
