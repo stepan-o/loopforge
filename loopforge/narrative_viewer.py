@@ -10,7 +10,7 @@ Constraints:
 """
 
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from .reporting import DaySummary, AgentDayStats
 
@@ -36,13 +36,24 @@ class DayNarrative:
 
 # ----------------- Public API -----------------
 
-def build_day_narrative(day_summary: DaySummary, day_index: int) -> DayNarrative:
+# Light, static role flavor hooks (deterministic, template-only)
+ROLE_FLAVOR: Dict[str, str] = {
+    "optimizer": "always chasing efficiency",
+    "qa": "ever watchful for cracks in the system",
+    "maintenance": "hands always in the guts of the place",
+}
+
+def build_day_narrative(
+    day_summary: DaySummary,
+    day_index: int,
+    previous_day_summary: Optional[DaySummary] = None,
+) -> DayNarrative:
     """Build a DayNarrative from a DaySummary.
 
     Numeric inputs are taken exclusively from telemetry-backed DaySummary fields.
     """
-    tension = float(getattr(day_summary, "tension_score", 0.0) or 0.0)
-    day_intro = _describe_tension(tension)
+    tension_today = float(getattr(day_summary, "tension_score", 0.0) or 0.0)
+    day_intro = _describe_tension(tension_today)
 
     # Build per-agent beats
     beats: List[AgentDayBeat] = []
@@ -60,7 +71,15 @@ def build_day_narrative(day_summary: DaySummary, day_index: int) -> DayNarrative
         )
 
     supervisor_line = _describe_supervisor(day_summary)
-    day_outro = _describe_day_outro(tension)
+
+    # Day outro considers trend vs previous day if provided
+    tension_prev = None
+    if previous_day_summary is not None:
+        try:
+            tension_prev = float(getattr(previous_day_summary, "tension_score", 0.0) or 0.0)
+        except Exception:
+            tension_prev = None
+    day_outro = _describe_day_outro(tension_today, tension_prev)
 
     return DayNarrative(
         day_index=day_index,
@@ -85,11 +104,23 @@ def _describe_tension(tension: float) -> str:
 
 def _describe_agent_intro(name: str, role: str, stats: AgentDayStats) -> str:
     s = float(getattr(stats, "avg_stress", 0.0) or 0.0)
-    if s >= 0.3:
-        return f"{name} starts the shift wound a little tight."
-    if s >= 0.1:
-        return f"{name} comes online steady but alert."
-    return f"{name} drifts into the shift almost relaxed."
+    # Shared bands: low < 0.08, mid 0.08–0.3, high > 0.3
+    if s > 0.3:
+        base = f"{name} starts the shift wound a little tight."
+    elif s >= 0.08:
+        base = f"{name} comes online steady but alert."
+    else:
+        base = f"{name} drifts into the shift almost relaxed."
+
+    # Append light character flavor based on role, if known
+    flavor = ROLE_FLAVOR.get((role or "").lower().strip())
+    if flavor:
+        # Convert final period to an em-dash clause for smoother reading
+        if base.endswith("."):
+            base = base[:-1] + f" — {flavor}."
+        else:
+            base = base + f" — {flavor}."
+    return base
 
 
 def _describe_agent_perception(stats: AgentDayStats) -> str:
@@ -133,10 +164,11 @@ def _describe_agent_actions(role: str, stats: AgentDayStats) -> str:
 
 def _describe_agent_closing(stats: AgentDayStats) -> str:
     s = float(getattr(stats, "avg_stress", 0.0) or 0.0)
-    if s >= 0.6:
-        return "Powers down still carrying tension."
-    if s >= 0.3:
-        return "Ends the day with manageable stress."
+    # Shared bands: low < 0.08, mid 0.08–0.3, high > 0.3
+    if s > 0.3:
+        return "Ends the day carrying some weight."
+    if s >= 0.08:
+        return "Ends the day balanced, tension kept in check."
     return "Ends the day calm, nothing sticking."
 
 
@@ -152,9 +184,23 @@ def _describe_supervisor(day_summary: DaySummary) -> str:
     return "Supervisor’s presence is felt in frequent reminders and broadcasts."
 
 
-def _describe_day_outro(tension: float) -> str:
-    if tension > 0.6:
+def _describe_day_outro(tension_today: float, tension_prev: Optional[float]) -> str:
+    """Trend-aware day outro.
+
+    - If previous day is provided, compute trend with epsilon=0.05 thresholds.
+    - Else, fall back to intro-matched current-tension summary.
+    """
+    if tension_prev is not None:
+        delta = tension_today - float(tension_prev)
+        if delta > 0.05:
+            return "The shift closes on a slightly tighter note; the floor hums with leftover static."
+        if delta < -0.05:
+            return "The shift winds down lighter than it began; the floor exhales a little."
+        return "Shift complete; the floor settles into its usual idle."
+
+    # Day 0 fallback: map to current tension only
+    if tension_today > 0.6:
         return "The day ends with tension still clinging to the walls."
-    if tension < 0.1:
+    if tension_today < 0.1:
         return "The factory powers down in calm silence."
     return "Shift complete; the floor eases back to idle."

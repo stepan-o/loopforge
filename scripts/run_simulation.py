@@ -172,7 +172,8 @@ def view_episode(
         typer.echo("\nDAY NARRATIVES")
         typer.echo("==============================")
         for idx, day in enumerate(episode.days):
-            dn = build_day_narrative(day, idx)
+            prev = episode.days[idx - 1] if idx > 0 else None
+            dn = build_day_narrative(day, idx, previous_day_summary=prev)
             _print_day_narrative(dn)
 
 
