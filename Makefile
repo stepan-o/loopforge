@@ -102,8 +102,12 @@ docker-logs:
 	$(DC) logs -f --tail=200
 
 # Tests
-test:
+ test:
 	$(UV) run pytest
+
+# Dev cockpit: summarize one day from logs
+run-day:
+	$(UV) run loopforge-sim view-day
 
 # Coverage run
 .PHONY: test-cov

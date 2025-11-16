@@ -159,6 +159,78 @@ def decide_supervisor_action_plan(step: int, summary: str) -> AgentActionPlan:
 
 # ------------------------------ Public API ----------------------------------
 
+def decide_robot_action_plan_and_dict(perception: AgentPerception) -> tuple[AgentActionPlan, dict]:
+    """Return both an AgentActionPlan and the legacy action dict for logging.
+
+    Behavior:
+    - When USE_LLM_POLICY is False, this wraps decide_robot_action_plan(perception)
+      and constructs the legacy action dict from the plan.
+    - When USE_LLM_POLICY is True, it queries the LLM for a legacy action dict
+      and synthesizes an AgentActionPlan with deterministic risk and mode
+      heuristics. On any LLM failure, it falls back to the deterministic plan.
+    """
+    name = perception.name
+    role = perception.role
+    step = perception.step
+    location = perception.location
+    battery_level = int(perception.battery_level or 0)
+
+    if not USE_LLM_POLICY:
+        plan = decide_robot_action_plan(perception)
+        action_dict = {
+            "action_type": plan.intent,
+            "destination": plan.move_to,
+            "content": None,
+            "narrative": plan.narrative,
+        }
+        return plan, action_dict
+
+    state: dict[str, Any] = {
+        "name": name,
+        "role": role,
+        "step": step,
+        "location": location,
+        "battery_level": battery_level,
+        "emotions": {
+            "stress": float(perception.emotions.get("stress", 0.2)),
+            "curiosity": float(perception.emotions.get("curiosity", 0.5)),
+            "social_need": float(perception.emotions.get("social_need", 0.3)),
+            "satisfaction": float(perception.emotions.get("satisfaction", 0.5)),
+        },
+    }
+
+    system_prompt = (
+        "You control a robot in Loopforge City. Return ONLY a JSON object with keys "
+        "'action_type' (move|work|talk|recharge|inspect|idle), 'destination' (or null), "
+        "and 'content' (short note or null). Keep actions realistic for the rooms."
+    )
+    schema_hint = '{"action_type": str, "destination": str|null, "content": str|null}'
+    user_message = f"Robot state:\n{state}\nDecide the next action. Only return JSON."
+
+    raw = chat_json(system_prompt, [{"role": "user", "content": user_message}], schema_hint)
+    if not raw or "action_type" not in raw:
+        logger.debug("LLM decision missing/invalid for %s; falling back to deterministic", name)
+        plan = decide_robot_action_plan(perception)
+        action_dict = {
+            "action_type": plan.intent,
+            "destination": plan.move_to,
+            "content": None,
+            "narrative": plan.narrative,
+        }
+        return plan, action_dict
+
+    action = str(raw.get("action_type", "idle")).lower()
+    dest = raw.get("destination")
+    content = raw.get("content")
+
+    stress = float(perception.emotions.get("stress", 0.2))
+    risk = min(1.0, max(0.0, 0.5 * stress + (1.0 - min(1.0, battery_level / 100.0)) * 0.3))
+    mode = decide_mode_from_traits(perception)
+    narrative = f"I will {action} at {dest or location}. Battery={battery_level}%, stress={stress:.2f}."
+    plan = AgentActionPlan(intent=action, move_to=dest, targets=[], riskiness=risk, mode=mode, narrative=narrative)
+    action_dict = {"action_type": action, "destination": dest, "content": content, "narrative": narrative}
+    return plan, action_dict
+
 def decide_robot_action(
     name: str,
     role: str,

@@ -13,6 +13,11 @@ import typer
 
 from loopforge.simulation import run_simulation
 from loopforge.config import get_settings
+from loopforge.logging_utils import read_action_log_entries
+from loopforge.day_runner import run_one_day_with_supervisor
+from loopforge.types import ActionLogEntry
+from pathlib import Path
+from collections import Counter, defaultdict
 
 app = typer.Typer(add_completion=False, help="Run the Loopforge City simulation loop")
 
@@ -28,6 +33,97 @@ def main(
     mode = "no-DB (in-memory)" if not persist else "DB-backed"
     typer.echo(f"Starting Loopforge City simulation for {num_steps} steps ({mode})...")
     run_simulation(num_steps=num_steps, persist_to_db=persist)
+
+
+@app.command()
+def view_day(
+    action_log_path: Path = typer.Option(Path("logs/loopforge_actions.jsonl"), help="Path to JSONL action log"),
+    reflection_log_path: Path | None = typer.Option(None, help="Where to write reflections JSONL (optional)"),
+    supervisor_log_path: Path | None = typer.Option(None, help="Where to write supervisor JSONL (optional)"),
+    steps_per_day: int = typer.Option(50, help="Number of steps per simulated day"),
+    day_index: int = typer.Option(0, help="Day index to summarize (0-based)"),
+) -> None:
+    """Summarize one day of Loopforge from JSONL logs.
+
+    Reads action entries, builds a minimal env + agent stubs, runs the day runner
+    with supervisor, and prints a compact report for devs.
+    """
+    entries: list[ActionLogEntry] = read_action_log_entries(action_log_path)
+    if not entries:
+        typer.echo(f"No action entries found at {action_log_path}")
+        raise typer.Exit(code=0)
+
+    # Build minimal env + agent stubs inferred from entries
+    class _Env:
+        def __init__(self) -> None:
+            self.supervisor_messages = {}
+    env = _Env()
+
+    # Deduce agents (name, role)
+    agent_roles: dict[str, str] = {}
+    for e in entries:
+        agent_roles.setdefault(e.agent_name, e.role)
+    agents = [type("AgentStub", (), {"name": n, "role": r, "traits": {}})() for n, r in sorted(agent_roles.items())]
+
+    # Run day orchestration (reads logs, not env)
+    messages = run_one_day_with_supervisor(
+        env=env,
+        agents=agents,
+        steps_per_day=steps_per_day,
+        day_index=day_index,
+        action_log_path=action_log_path,
+        reflection_log_path=reflection_log_path,
+        supervisor_log_path=supervisor_log_path,
+    )
+
+    # Slice entries for this day for stats
+    start = day_index * steps_per_day
+    end = (day_index + 1) * steps_per_day
+    day_entries = [e for e in entries if start <= e.step < end]
+
+    # Prepare aggregates
+    by_agent: dict[str, list[ActionLogEntry]] = defaultdict(list)
+    for e in day_entries:
+        by_agent[e.agent_name].append(e)
+
+    typer.echo(f"Day {day_index} — Summary")
+    typer.echo("=" * 25)
+    typer.echo("")
+
+    for name in sorted(agent_roles.keys()):
+        role = agent_roles[name]
+        rows = by_agent.get(name, [])
+        intents = Counter(e.intent for e in rows if e.intent)
+        # Average emotions from perception snapshot if available
+        stress_vals = []
+        curiosity_vals = []
+        satisfaction_vals = []
+        for e in rows:
+            emo = (e.perception or {}).get("emotions") or {}
+            if isinstance(emo, dict):
+                stress_vals.append(float(emo.get("stress", 0.0)))
+                curiosity_vals.append(float(emo.get("curiosity", 0.0)))
+                satisfaction_vals.append(float(emo.get("satisfaction", 0.0)))
+        def _avg(vs: list[float]) -> float:
+            return sum(vs) / len(vs) if vs else 0.0
+        top3 = ", ".join(f"{k} ({v})" for k, v in intents.most_common(3)) or "(no intents)"
+        typer.echo(f"{name} ({role})")
+        typer.echo(f"- Intents: {top3}")
+        typer.echo(
+            f"- Emotions: stress={_avg(stress_vals):.2f}, curiosity={_avg(curiosity_vals):.2f}, satisfaction={_avg(satisfaction_vals):.2f}"
+        )
+        # Best-effort reflection summary: take the last narrative for the agent on that day
+        summary_line = None
+        for e in reversed(rows):
+            if e.narrative:
+                summary_line = e.narrative
+                break
+        typer.echo(f"- Reflection: \"{summary_line or '—'}\"")
+        typer.echo("")
+
+    typer.echo("Supervisor")
+    sup_intents = ", ".join(f"\"{m.intent}\"" for m in messages) or "(none)"
+    typer.echo(f"- Messages: {sup_intents}")
 
 
 if __name__ == "__main__":

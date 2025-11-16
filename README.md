@@ -95,6 +95,36 @@ make run        # runs 10 steps with --no-db
 - You can change the number of steps with the CLI, e.g. `uv run loopforge-sim --no-db --steps 5` or by editing the Makefile target.
 - This mode ignores any database settings and requires no Postgres running locally.
 
+#### View a day from JSONL logs (dev cockpit)
+
+After you run the sim (no‑DB or DB), you can summarize a single day directly from the JSONL action log. This reads logs only — no UI, just clean text.
+
+```bash
+make run-day                    # summarizes Day 0 by default from logs/loopforge_actions.jsonl
+uv run loopforge-sim view-day   # same as make target
+```
+
+Options:
+- `--day-index N` choose which day to view (0-based)
+- `--steps-per-day 50` if your day size differs
+- `--action-log-path PATH` to point at a different JSONL file
+- `--reflection-log-path PATH` to also write reflections JSONL
+- `--supervisor-log_path PATH` to also write supervisor JSONL
+
+Example output:
+```
+Day 0 — Summary
+=========================
+
+Sprocket (maintenance)
+- Intents: work (7), inspect (2), recharge (1)
+- Emotions: stress=0.71, curiosity=0.54, satisfaction=0.33
+- Reflection: "I plan to keep the line running..."
+
+Supervisor
+- Messages: "encourage_context", "neutral_update"
+```
+
 ### B) Containers: app + db (recommended for normal runs)
 
 Prereqs: Docker and docker-compose installed.

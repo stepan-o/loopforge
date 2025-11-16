@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any, List, Optional
 
-from loopforge.logging_utils import JsonlReflectionLogger, JsonlSupervisorLogger
+from loopforge.logging_utils import JsonlReflectionLogger, JsonlSupervisorLogger, read_action_log_entries
 from loopforge.reflection import (
     filter_entries_for_day,
     run_daily_reflections_for_all_agents,
@@ -15,41 +15,15 @@ from loopforge.types import ActionLogEntry, AgentReflection, SupervisorMessage
 
 
 def _read_action_log(path: Path) -> List[ActionLogEntry]:
-    """Read JSONL action log into ActionLogEntry objects.
+    """Read JSONL action log into ActionLogEntry objects (fail-soft).
 
-    If the file does not exist or is empty, return an empty list.
+    Delegates to logging_utils.read_action_log_entries for consistent parsing
+    and malformed-line skipping.
     """
-    p = Path(path)
-    if not p.exists():
+    try:
+        return read_action_log_entries(Path(path))
+    except Exception:
         return []
-    entries: List[ActionLogEntry] = []
-    with p.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-                # ActionLogEntry requires specific keys; tolerate missing with defaults
-                e = ActionLogEntry(
-                    step=int(data.get("step", 0)),
-                    agent_name=str(data.get("agent_name", "")),
-                    role=str(data.get("role", "")),
-                    mode=data.get("mode", "guardrail"),
-                    intent=str(data.get("intent", "")),
-                    move_to=data.get("move_to"),
-                    targets=list(data.get("targets", [])),
-                    riskiness=float(data.get("riskiness", 0.0)),
-                    narrative=str(data.get("narrative", "")),
-                    outcome=data.get("outcome"),
-                    raw_action=dict(data.get("raw_action", {})),
-                    perception=dict(data.get("perception", {})),
-                )
-                entries.append(e)
-            except Exception:
-                # fail-soft; skip bad lines
-                continue
-    return entries
 
 
 def run_one_day(
@@ -63,25 +37,15 @@ def run_one_day(
     episode_index: Optional[int] = None,
 ) -> List[AgentReflection]:
     """
-    - Run `steps_per_day` environment steps.
-    - Collect ActionLogEntries from the JSONL action log.
+    - Read ActionLogEntries from the JSONL action log.
     - Filter to this day's entries.
     - Run reflections for all agents.
     - Log reflections if logger provided.
     - Return list of AgentReflection.
 
     Notes:
-    - This helper is opt-in scaffolding and does not alter environment behavior.
-    - It assumes `env` has a `step()` method to advance one simulation step.
+    - This helper is read-only over logs; it does not advance the simulation.
     """
-    # Advance the environment for the requested number of steps
-    if hasattr(env, "step") and callable(getattr(env, "step")):
-        for _ in range(steps_per_day):
-            env.step()
-    else:
-        # If there's no step method, treat this as a no-op; scaffolding remains optional
-        pass
-
     # Read all action entries and slice the window for this day
     all_entries = _read_action_log(action_log_path)
     day_entries = filter_entries_for_day(all_entries, day_index, steps_per_day)
@@ -169,7 +133,7 @@ def run_one_day_with_supervisor(
             except Exception:
                 pass
 
-    # Resolve supervisor log path with precedence
+    # Resolve supervisor log path with precedence: env > param > default
     env_override = os.getenv("SUPERVISOR_LOG_PATH")
     if env_override:
         sup_path = Path(env_override)

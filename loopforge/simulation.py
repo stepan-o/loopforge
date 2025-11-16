@@ -24,7 +24,7 @@ from .emotions import (
 from .environment import LoopforgeEnvironment, generate_environment_events
 from .models import ActionLog, EnvironmentEvent, Memory, Robot
 from .narrative import build_agent_perception
-from .llm_stub import decide_robot_action_plan
+from .llm_stub import decide_robot_action_plan, decide_robot_action_plan_and_dict
 from pathlib import Path
 from .logging_utils import JsonlActionLogger, log_action_step
 from . import llm_stub
@@ -144,31 +144,20 @@ def run_simulation(
             env.advance()
             step_summaries: List[str] = []
             for agent in robots_agents:
-                # Build perception → plan via explicit seam when not using LLM
-                if llm_stub.USE_LLM_POLICY:
-                    decision = agent.decide(step)
-                    plan_narrative = decision.get("narrative")
-                else:
-                    perception = build_agent_perception(agent, env, step)
-                    plan = decide_robot_action_plan(perception)
-                    # Convert to legacy dict; keep shape stable
-                    decision = {
-                        "action_type": plan.intent,
-                        "destination": plan.move_to,
-                        "content": None,
-                        "narrative": plan.narrative,
-                    }
-                    # Log the action step (fail-soft)
-                    try:
-                        log_action_step(
-                            logger=action_logger,
-                            perception=perception,
-                            plan=plan,
-                            action=decision,
-                            outcome=None,
-                        )
-                    except Exception:
-                        pass
+                # Build perception → plan via explicit seam (always), regardless of LLM flag.
+                perception = build_agent_perception(agent, env, step)
+                plan, decision = decide_robot_action_plan_and_dict(perception)
+                # Log the action step exactly once (fail-soft)
+                try:
+                    log_action_step(
+                        logger=action_logger,
+                        perception=perception,
+                        plan=plan,
+                        action=decision,
+                        outcome=None,
+                    )
+                except Exception:
+                    pass
                 action = decision.get("action_type", "idle")
                 dest = decision.get("destination") or agent.location
                 agent.location = dest
@@ -224,28 +213,19 @@ def run_simulation(
             step_summaries: List[str] = []
             # Each robot decides and acts
             for r, agent in zip(robots, agents):
-                # Build perception → plan via explicit seam when not using LLM
-                if llm_stub.USE_LLM_POLICY:
-                    decision = agent.decide(step)
-                else:
-                    perception = build_agent_perception(agent, env, step)
-                    plan = decide_robot_action_plan(perception)
-                    decision = {
-                        "action_type": plan.intent,
-                        "destination": plan.move_to,
-                        "content": None,
-                        "narrative": plan.narrative,
-                    }
-                    try:
-                        log_action_step(
-                            logger=action_logger,
-                            perception=perception,
-                            plan=plan,
-                            action=decision,
-                            outcome=None,
-                        )
-                    except Exception:
-                        pass
+                # Build perception → plan via explicit seam (always), regardless of LLM flag.
+                perception = build_agent_perception(agent, env, step)
+                plan, decision = decide_robot_action_plan_and_dict(perception)
+                try:
+                    log_action_step(
+                        logger=action_logger,
+                        perception=perception,
+                        plan=plan,
+                        action=decision,
+                        outcome=None,
+                    )
+                except Exception:
+                    pass
                 action = decision.get("action_type", "idle")
                 dest = decision.get("destination") or r.location
                 content = decision.get("content")
