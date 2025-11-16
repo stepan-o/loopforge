@@ -338,6 +338,91 @@ print([m.intent for m in msgs])
 
 See `docs/ARCHITECTURE_EVOLUTION_PLAN.md` for the full phased roadmap and `docs/JUNIE_SYSTEM_PROMPT.md` for the engineering covenant that guides changes.
 
+## Episodes, Metrics & Weave (Phases 9–10 Lite)
+
+These layers are additive, pure, and log-powered. They do not change the simulation or DB schemas.
+
+### Episodes (indexing and orchestration)
+- Additive labels on logs (nullable by default):
+  - `ActionLogEntry.episode_index: int | None`, `ActionLogEntry.day_index: int | None`
+  - `ReflectionLogEntry.episode_index: int | None` (day index already present)
+  - `SupervisorMessage.episode_index: int | None`
+- Orchestrator:
+  - `day_runner.run_episode(env, agents, num_days, steps_per_day, *, persist_to_db, episode_index=0, action_log_path=None, reflection_log_path=None, supervisor_log_path=None)`
+  - Delegates to `run_one_day_with_supervisor(...)` for each day, threading `(episode_index, day_index)` into reflection and supervisor logs.
+
+Minimal example:
+```python
+from pathlib import Path
+from types import SimpleNamespace
+from loopforge.day_runner import run_episode
+
+class Env:
+    def step(self):
+        pass
+
+env = Env()
+agents = [SimpleNamespace(name="A", role="maintenance", traits={})]
+
+run_episode(
+    env=env,
+    agents=agents,
+    num_days=2,
+    steps_per_day=3,
+    persist_to_db=False,
+    episode_index=7,
+    action_log_path=Path("logs/loopforge_actions.jsonl"),
+    reflection_log_path=Path("logs/reflections.jsonl"),
+    supervisor_log_path=Path("logs/loopforge_supervisor.jsonl"),
+)
+```
+
+### Metrics Harness (pure helpers)
+Module: `loopforge/metrics.py`.
+
+- Readers (fail‑soft):
+  - `read_action_logs(path) -> list[ActionLogEntry]`
+  - `read_reflection_logs(path) -> list[ReflectionLogEntry]`
+  - `read_supervisor_logs(path) -> list[dict]`
+- Metric helpers:
+  - `compute_incident_rate(actions)` → `{incident_rate, total_steps, incidents}`
+  - `compute_mode_distribution(actions)` → counts + normalized `distribution`
+  - `compute_perception_mode_distribution(reflections)`
+  - `compute_supervisor_intent_distribution(reflections)` (uses perceived labels from reflections)
+  - `compute_belief_vs_truth_drift(actions, reflections)` (v1 drift proxy via `perception_mode`)
+  - Segmenters: `segment_by_episode(actions)`, `segment_by_day(actions)`
+- Optional CLI: `scripts/metrics.py` (Typer)
+  - Incidents: `uv run python -m scripts.metrics incidents --actions logs/loopforge_actions.jsonl`
+  - Modes: `uv run python -m scripts.metrics modes --actions logs/loopforge_actions.jsonl`
+  - Perception modes: `uv run python -m scripts.metrics pmods --reflections logs/reflections.jsonl`
+  - Drift: `uv run python -m scripts.metrics drift --actions logs/loopforge_actions.jsonl --reflections logs/reflections.jsonl`
+
+### Weave (episode tension snapshots)
+- Core type: `EpisodeTensionSnapshot` with JSON round‑trip (`loopforge/types.py`).
+- Compute from logs (pure): `loopforge/weave.py`
+  - `compute_episode_tension_snapshot(episode_index, actions, reflections) -> EpisodeTensionSnapshot`
+  - `compute_all_episode_snapshots(actions, reflections) -> list[EpisodeTensionSnapshot]`
+- JSONL writer: `JsonlWeaveLogger` in `loopforge/logging_utils.py` writes one snapshot per line (fail‑soft) to a separate file (e.g., `logs/loopforge_weave.jsonl`).
+
+Example (derive and write one snapshot):
+```python
+from pathlib import Path
+from loopforge.metrics import read_action_logs, read_reflection_logs
+from loopforge.weave import compute_all_episode_snapshots
+from loopforge.logging_utils import JsonlWeaveLogger
+
+actions = read_action_logs("logs/loopforge_actions.jsonl")
+reflections = read_reflection_logs("logs/reflections.jsonl")
+snaps = compute_all_episode_snapshots(actions, reflections)
+logger = JsonlWeaveLogger(Path("logs/loopforge_weave.jsonl"))
+for s in snaps:
+    logger.write_snapshot(s)
+```
+
+Notes:
+- All of the above are optional and can be used offline.
+- Default runs behave exactly as before; new fields are nullable and logging remains fail‑soft.
+
 ## Testing & Coverage
 
 - Run all tests locally:
