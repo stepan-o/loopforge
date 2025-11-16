@@ -320,6 +320,61 @@ def explain_episode(
     typer.echo(text)
 
 
+@app.command("lens-agent")
+def lens_agent(
+    action_log_path: Path = typer.Option(Path("logs/loopforge_actions.jsonl"), help="Path to JSONL action log"),
+    steps_per_day: int = typer.Option(50, help="Number of steps per simulated day"),
+    day_index: int = typer.Option(0, help="Day index to summarize (0-based)"),
+    agent: str = typer.Option(..., "--agent", "-a", help="Agent name to build lens for"),
+) -> None:
+    """Build and print the LLM perception lens input + fake output for a single agent (read-only)."""
+    # Build the DaySummary for the selected day
+    ds = compute_day_summary(
+        day_index=day_index,
+        action_log_path=action_log_path,
+        steps_per_day=steps_per_day,
+    )
+
+    try:
+        from loopforge.llm_lens import build_llm_perception_lens_input, fake_llm_perception_lens
+    except Exception as e:
+        typer.echo(f"LLM lens module not available: {e}")
+        raise typer.Exit(code=1)
+
+    lens_in = build_llm_perception_lens_input(ds, agent)
+    if lens_in is None:
+        typer.echo(f"No stats found for agent '{agent}' on day {day_index}.")
+        raise typer.Exit(code=0)
+
+    lens_out = fake_llm_perception_lens(lens_in)
+
+    # Pretty-print (small JSON-ish block)
+    import json as _json
+    typer.echo("LLM PERCEPTION LENS (input)")
+    typer.echo("-----------------------------")
+    typer.echo(_json.dumps({
+        "agent_name": lens_in.agent_name,
+        "role": lens_in.role,
+        "day_index": lens_in.day_index,
+        "perception_mode": lens_in.perception_mode,
+        "avg_stress": lens_in.avg_stress,
+        "guardrail_count": lens_in.guardrail_count,
+        "context_count": lens_in.context_count,
+        "tension": lens_in.tension,
+        "supervisor_tone_hint": lens_in.supervisor_tone_hint,
+    }, indent=2))
+
+    typer.echo("")
+    typer.echo("LLM PERCEPTION LENS (fake output)")
+    typer.echo("----------------------------------")
+    typer.echo(_json.dumps({
+        "emotional_read": lens_out.emotional_read,
+        "risk_assessment": lens_out.risk_assessment,
+        "suggested_focus": lens_out.suggested_focus,
+        "supervisor_comment_prompt": lens_out.supervisor_comment_prompt,
+    }, indent=2))
+
+
 if __name__ == "__main__":
     app()
 
