@@ -280,6 +280,46 @@ def _print_episode_summary(episode: EpisodeSummary) -> None:
             typer.echo(f"⚠ {name} relied heavily on guardrails this episode ({a.guardrail_total} / {a.context_total}).")
 
 
+@app.command("explain-episode")
+def explain_episode(
+    action_log_path: Path = typer.Option(Path("logs/loopforge_actions.jsonl"), help="Path to JSONL action log"),
+    steps_per_day: int = typer.Option(50, help="Number of steps per simulated day"),
+    days: int = typer.Option(3, help="Number of days to include in the episode"),
+    agent: str = typer.Option(..., "--agent", "-a", help="Agent name to explain"),
+) -> None:
+    """Explain one agent's episode using deterministic, rule-based templates."""
+    # Compute day summaries via the shared path
+    day_summaries = []
+    for day_index in range(days):
+        ds = compute_day_summary(
+            day_index=day_index,
+            action_log_path=action_log_path,
+            steps_per_day=steps_per_day,
+        )
+        day_summaries.append(ds)
+
+    episode = summarize_episode(day_summaries)
+
+    # Build contexts and explanation text
+    try:
+        from loopforge.characters import CHARACTERS
+        from loopforge.explainer_context import build_episode_context, build_agent_focus_context
+        from loopforge.explainer import explain_agent_episode
+    except Exception as e:
+        typer.echo(f"Explainer modules not available: {e}")
+        raise typer.Exit(code=1)
+
+    episode_ctx = build_episode_context(episode, episode.days, CHARACTERS)
+    agent_ctx = build_agent_focus_context(episode, episode.days, CHARACTERS, agent)
+    text = explain_agent_episode(agent_ctx)
+
+    typer.echo("EPISODE EXPLAINER")
+    typer.echo("==================")
+    typer.echo(f"Agent: {agent}")
+    typer.echo("")
+    typer.echo(text)
+
+
 if __name__ == "__main__":
     app()
 
